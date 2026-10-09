@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUp, Check, Circle, Loader2, MessageCircle, Minus, Pencil, Plus, Radio, RefreshCw, Square, Type } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Check, Circle, Expand, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Square, Trash2, Type } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
 import { useSocket, type ChatMessage, type GuestUser, type RoomUser } from './hooks/useSocket';
@@ -33,7 +33,19 @@ function Avatar({ name, color, size = 'normal' }: { name: string; color: string;
   );
 }
 
-function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; onExit: () => void }) {
+function RoomWorkspace({
+  room,
+  user,
+  onExit,
+  expanded,
+  onToggleExpanded,
+}: {
+  room: Room;
+  user: GuestUser;
+  onExit: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+}) {
   const [messageDraft, setMessageDraft] = useState('');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
@@ -46,6 +58,7 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
     presence,
     messages,
     error,
+    roomDeleted,
     clearError,
     sendDraw,
     sendCursor,
@@ -55,6 +68,10 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
+
+  useEffect(() => {
+    if (roomDeleted) onExit();
+  }, [roomDeleted, onExit]);
 
   const handleSendMessage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -129,11 +146,22 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
               />
               <span>Color</span>
             </label>
+            <button
+              type="button"
+              className="board-expand-button"
+              onClick={onToggleExpanded}
+              aria-label={expanded ? 'Minimize drawing board' : 'Expand drawing board'}
+              title={expanded ? 'Minimize board (Esc)' : 'Expand board'}
+            >
+              {expanded ? <Minimize2 size={15} /> : <Expand size={15} />}
+              <span>{expanded ? 'Minimize' : 'Full screen'}</span>
+            </button>
             <span className="toolbar-hint">{currentTool === 'line' ? 'Drag to draw a straight line' : currentTool === 'text' ? 'Click anywhere to add a text label' : 'Draw together, in real time'}</span>
           </div>
           <div className="canvas-frame">
-            <Canvas userId={user.id} sendDraw={sendDraw} sendCursor={sendCursor} />
+            <Canvas userId={user.id} sendDraw={sendDraw} sendCursor={sendCursor} expanded={expanded} />
           </div>
+          {expanded && <span className="pan-hint">Hold Space and drag to move around the board</span>}
           {error && (
             <button className="inline-error" onClick={clearError} role="alert">
               {error} <span>Dismiss</span>
@@ -199,13 +227,24 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
 }
 
 function App() {
-  const { data: rooms, isLoading, isError, error, refetch, createRoom, isCreatingRoom, createRoomError } = useRooms();
+  const { data: rooms, isLoading, isError, error, refetch, createRoom, isCreatingRoom, createRoomError, deleteRoom, isDeletingRoom } = useRooms();
   const [user, setUser] = useState<GuestUser>(makeGuest);
   const [nameDraft, setNameDraft] = useState(user.name);
   const [roomName, setRoomName] = useState('');
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [roomFormError, setRoomFormError] = useState('');
+  const [roomDeleteError, setRoomDeleteError] = useState('');
+  const [boardExpanded, setBoardExpanded] = useState(false);
   const activeRoom = rooms?.find((room) => room.id === activeRoomId) ?? null;
+
+  useEffect(() => {
+    if (!boardExpanded) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBoardExpanded(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [boardExpanded]);
 
   const saveName = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -220,6 +259,10 @@ function App() {
     const name = roomName.trim();
     if (!name || !user.name) return;
     setRoomFormError('');
+    if (rooms?.some((room) => room.name.trim().toLowerCase() === name.toLowerCase())) {
+      setRoomFormError('A room with this name already exists.');
+      return;
+    }
     try {
       const room = await createRoom({ name, ownerId: user.id });
       setRoomName('');
@@ -229,8 +272,27 @@ function App() {
     }
   };
 
+  const handleDeleteRoom = async (room: Room) => {
+    const confirmed = window.confirm(
+      `Delete "${room.name}"? This permanently removes the room, its drawings, and its chat history.`,
+    );
+    if (!confirmed) return;
+    setRoomDeleteError('');
+    try {
+      await deleteRoom({ roomId: room.id, ownerId: user.id });
+      if (activeRoomId === room.id) setActiveRoomId(null);
+    } catch (deleteError) {
+      setRoomDeleteError(deleteError instanceof Error ? deleteError.message : 'Could not delete room.');
+    }
+  };
+
+  const handleRoomDeletedByOwner = () => {
+    setActiveRoomId(null);
+    void refetch();
+  };
+
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${boardExpanded ? 'board-fullscreen' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark"><Pencil size={18} /></span>
@@ -260,6 +322,7 @@ function App() {
             {!user.name && <p className="form-hint">Add your name below to create a room.</p>}
             {(roomFormError || createRoomError) && <p className="form-error" role="alert">{roomFormError || createRoomError?.message}</p>}
           </form>
+          {roomDeleteError && <p className="form-error room-delete-error" role="alert">{roomDeleteError}</p>}
 
           <nav className="room-list" aria-label="Available rooms">
             {isLoading ? (
@@ -270,17 +333,30 @@ function App() {
                 <button onClick={() => void refetch()}><RefreshCw size={14} /> Retry</button>
               </div>
             ) : rooms?.length ? rooms.map((room) => (
-              <button
-                type="button"
-                className={`room-link ${activeRoomId === room.id ? 'room-link-active' : ''}`}
-                key={room.id}
-                onClick={() => setActiveRoomId(room.id)}
-                disabled={!user.name}
-                title={!user.name ? 'Enter your name to join' : room.name}
-              >
-                <span className="room-link-icon">#</span>
-                <span className="room-link-name">{room.name}</span>
-              </button>
+              <div className={`room-list-item ${activeRoomId === room.id ? 'room-list-item-active' : ''}`} key={room.id}>
+                <button
+                  type="button"
+                  className={`room-link ${activeRoomId === room.id ? 'room-link-active' : ''}`}
+                  onClick={() => setActiveRoomId(room.id)}
+                  disabled={!user.name}
+                  title={!user.name ? 'Enter your name to join' : room.name}
+                >
+                  <span className="room-link-icon">#</span>
+                  <span className="room-link-name">{room.name}</span>
+                </button>
+                {room.ownerId === user.id && (
+                  <button
+                    type="button"
+                    className="room-delete-button"
+                    onClick={() => void handleDeleteRoom(room)}
+                    disabled={isDeletingRoom}
+                    aria-label={`Delete ${room.name}`}
+                    title="Delete room"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
             )) : (
               <div className="list-empty">No rooms yet. Create one to get started.</div>
             )}
@@ -323,7 +399,13 @@ function App() {
         </header>
 
         {activeRoom ? (
-          <RoomWorkspace room={activeRoom} user={user} onExit={() => setActiveRoomId(null)} />
+          <RoomWorkspace
+            room={activeRoom}
+            user={user}
+            onExit={handleRoomDeletedByOwner}
+            expanded={boardExpanded}
+            onToggleExpanded={() => setBoardExpanded((expanded) => !expanded)}
+          />
         ) : (
           <section className="welcome-panel">
             <div className="welcome-content">

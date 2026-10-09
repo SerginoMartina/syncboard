@@ -3,13 +3,12 @@ import express from 'express';
 import { createServer } from 'node:http';
 import cors from 'cors';
 import { Server } from 'socket.io';
-import roomRoutes from './routes/rooms.js';
+import createRoomsRouter from './routes/rooms.js';
 import { initializeDatabase, pool } from './db.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/api/rooms', roomRoutes);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -20,6 +19,17 @@ const io = new Server(httpServer, {
 });
 
 const activeUsers = new Map();
+
+app.use('/api/rooms', createRoomsRouter({
+  onRoomDeleted: (roomId) => {
+    io.to(roomId).emit('room_deleted', roomId);
+    for (const [socketId, user] of activeUsers) {
+      if (user.roomId === roomId) activeUsers.delete(socketId);
+    }
+    io.in(roomId).socketsLeave(roomId);
+  },
+}));
+
 const nameIsValid = (name) => typeof name === 'string' && name.trim().length > 0 && name.trim().length <= 32;
 const colorIsValid = (color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);
 

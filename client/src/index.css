@@ -218,3 +218,50 @@ button:disabled { cursor: not-allowed; }
   .app-footer span:first-child { display: none; }
   .welcome-panel { min-height: 42dvh; }
 }
+
+.room-list-item { display: flex; align-items: center; gap: 4px; }
+.room-list-item .room-link { flex: 1; min-width: 0; }
+.room-delete-button {
+  display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center;
+  color: #a8a0a0; background: transparent; border: 0; border-radius: 7px;
+}
+.room-delete-button:hover:not(:disabled) { color: #bd4049; background: #fff0ee; }
+.room-delete-button:disabled { opacity: .5; }
+.room-delete-error { margin: 0 9px 5px; }
+.board-expand-button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 29px; padding: 0 9px;
+  color: #bd444c; background: #fff7f6; border: 1px solid #f1dedd; border-radius: 7px;
+  font-size: 10px; white-space: nowrap;
+}
+.board-expand-button:hover { background: #fff0ee; }
+.canvas-scroll-viewport { width: 100%; height: 100%; overflow: auto; overscroll-behavior: contain; }
+.canvas-surface { min-width: 100%; min-height: 100%; }
+.canvas-space-held { cursor: grab; }
+.canvas-is-panning { cursor: grabbing; user-select: none; }
+.canvas-is-panning .drawing-canvas { cursor: grabbing; }
+.pan-hint { align-self: center; padding-top: 7px; color: #9995a0; font-size: 10px; }
+
+.board-fullscreen { position: fixed; inset: 0; z-index: 20; display: block; width: 100%; height: 100%; }
+.board-fullscreen .sidebar,
+.board-fullscreen .topbar,
+.board-fullscreen .room-heading,
+.board-fullscreen .chat-panel,
+.board-fullscreen .app-footer { display: none; }
+.board-fullscreen .main-area { width: 100%; height: 100%; margin: 0; }
+.board-fullscreen .workspace { width: 100%; height: 100%; padding: 10px; }
+.board-fullscreen .workbench { display: flex; min-height: 0; }
+.board-fullscreen .canvas-column { flex: 1; }
+.board-fullscreen .canvas-toolbar { border-radius: 10px 10px 0 0; }
+.board-fullscreen .canvas-frame { min-height: 0; border-radius: 0 0 10px 10px; }
+.board-fullscreen .canvas-scroll-viewport { overflow: auto; }
+.board-fullscreen .canvas-surface { width: 2400px; height: 1600px; min-width: 2400px; min-height: 1600px; }
+.board-fullscreen .drawing-canvas { width: 2400px; height: 1600px; }
+
+@media (max-width: 760px) {
+  .board-fullscreen .workspace { padding: 7px; }
+  .board-fullscreen .canvas-toolbar { gap: 5px; padding: 0 7px; }
+  .board-fullscreen .tool-select { gap: 3px; padding: 5px; }
+  .board-fullscreen .color-control { gap: 4px; padding: 4px; }
+  .board-fullscreen .board-expand-button { gap: 4px; padding: 0 6px; }
+  .board-fullscreen .pan-hint { padding-top: 4px; }
+}

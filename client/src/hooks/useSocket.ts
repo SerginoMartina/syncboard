@@ -36,6 +36,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
   const [presence, setPresence] = useState<RoomUser[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState('');
+  const [roomDeleted, setRoomDeleted] = useState(false);
   const addShape = useCanvasStore((state) => state.addShape);
   const setShapes = useCanvasStore((state) => state.setShapes);
   const updateRemoteCursor = useCanvasStore((state) => state.updateRemoteCursor);
@@ -46,6 +47,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     setPresence([]);
     setMessages([]);
     setError('');
+    setRoomDeleted(false);
 
     const joinRoom = () => {
       setIsConnected(true);
@@ -102,6 +104,9 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     };
     const handleActionError = (message: string) => setError(message);
     const handleRoomNotFound = () => setError('This room no longer exists. Refresh the room list and choose another.');
+    const handleRoomDeleted = (deletedRoomId: string) => {
+      if (deletedRoomId === roomId) setRoomDeleted(true);
+    };
 
     socket.on('connect', joinRoom);
     socket.on('disconnect', handleDisconnect);
@@ -112,6 +117,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     socket.on('chat_message', handleMessage);
     socket.on('action_error', handleActionError);
     socket.on('room_not_found', handleRoomNotFound);
+    socket.on('room_deleted', handleRoomDeleted);
     if (!socket.connected) socket.connect();
     else joinRoom();
 
@@ -126,6 +132,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       socket.off('chat_message', handleMessage);
       socket.off('action_error', handleActionError);
       socket.off('room_not_found', handleRoomNotFound);
+      socket.off('room_deleted', handleRoomDeleted);
       setPresence([]);
       setRemoteCursors({});
     };
@@ -158,6 +165,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     presence,
     messages,
     error,
+    roomDeleted,
     clearError: () => setError(''),
     sendDraw,
     sendCursor,

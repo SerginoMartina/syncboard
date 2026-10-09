@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS syncboard.rooms (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS rooms_name_case_insensitive_unique_idx
+    ON syncboard.rooms (lower(btrim(name)));
+
 CREATE TABLE IF NOT EXISTS syncboard.canvas_shapes (
     room_id text NOT NULL REFERENCES syncboard.rooms (id) ON DELETE CASCADE,
     id text NOT NULL,

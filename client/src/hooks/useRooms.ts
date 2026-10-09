@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { createRoom as createRoomRequest, fetchRooms } from '../services/rooms';
+import { createRoom as createRoomRequest, deleteRoom as deleteRoomRequest, fetchRooms } from '../services/rooms';
 
 export const useRooms = () => {
   const queryClient = useQueryClient();
@@ -16,10 +16,19 @@ export const useRooms = () => {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: deleteRoomRequest,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rooms'] });
+    },
+  });
+
   return {
     ...roomsQuery,
     createRoom: createMutation.mutateAsync,
     isCreatingRoom: createMutation.isPending,
     createRoomError: createMutation.error,
+    deleteRoom: deleteMutation.mutateAsync,
+    isDeletingRoom: deleteMutation.isPending,
   };
 };

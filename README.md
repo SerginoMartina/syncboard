@@ -21,6 +21,7 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 ### 4. Concurrency & Presence
 - **Remote Cursors:** Real-time presence of other users' mouse positions to improve collaboration UX.
 - **Room Isolation:** Drawings and chat are sent only to collaborators connected to the selected Socket.IO room.
+- **Board controls:** Room owners can delete rooms; expand a board for a scrollable workspace, pan with Space+drag, and press Escape to minimize.
 
 ---
 
@@ -54,6 +55,7 @@ service's environment. That role needs permission to create the schema and must
 own the SyncBoard tables so it can apply updates. This can be the database
 owner; all application tables remain isolated inside `syncboard`. Once
 deployed, the rooms endpoint is available at `/api/rooms`.
+Room names are unique case-insensitively, ignoring leading and trailing spaces.
 
 You can also apply the same migration manually:
 ```bash

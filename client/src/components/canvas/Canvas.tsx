@@ -5,6 +5,7 @@ type CanvasProps = {
   userId: string;
   sendDraw: (shape: Shape) => void;
   sendCursor: (x: number, y: number) => void;
+  expanded: boolean;
 };
 
 type TextDraft = {
@@ -46,10 +47,15 @@ const drawShape = (ctx: CanvasRenderingContext2D, shape: Shape) => {
   ctx.stroke();
 };
 
-const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
+const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor, expanded }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
   const drawingRef = useRef<Shape | null>(null);
+  const spaceDownRef = useRef(false);
+  const panRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
   const [currentShape, setCurrentShape] = useState<Shape | null>(null);
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const { shapes, currentTool, currentColor, remoteCursors } = useCanvasStore();
@@ -99,6 +105,40 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
     if (textDraft) textInputRef.current?.focus();
   }, [textDraft]);
 
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => (
+      target instanceof HTMLElement &&
+      (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName))
+    );
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || isEditableTarget(event.target)) return;
+      event.preventDefault();
+      spaceDownRef.current = true;
+      setSpaceHeld(true);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') {
+        spaceDownRef.current = false;
+        setSpaceHeld(false);
+      }
+    };
+    const handleBlur = () => {
+      spaceDownRef.current = false;
+      setSpaceHeld(false);
+      panRef.current = null;
+      setIsPanning(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+
   const pointFromEvent = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return null;
@@ -114,7 +154,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
   });
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || spaceDownRef.current) return;
     const point = pointFromEvent(event);
     if (!point) return;
 
@@ -130,6 +170,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (panRef.current) return;
     const point = pointFromEvent(event);
     if (!point) return;
     sendCursor(point[0], point[1]);
@@ -160,6 +201,38 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
     sendDraw(shape);
   };
 
+  const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!spaceDownRef.current || event.button !== 0) return;
+    event.preventDefault();
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    panRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+    };
+    setIsPanning(true);
+    viewport.setPointerCapture(event.pointerId);
+  };
+
+  const movePan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    const viewport = viewportRef.current;
+    if (!pan || !viewport || pan.pointerId !== event.pointerId) return;
+    viewport.scrollLeft = pan.scrollLeft - (event.clientX - pan.x);
+    viewport.scrollTop = pan.scrollTop - (event.clientY - pan.y);
+  };
+
+  const stopPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (panRef.current?.pointerId !== event.pointerId) return;
+    const viewport = viewportRef.current;
+    if (viewport?.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+    panRef.current = null;
+    setIsPanning(false);
+  };
+
   const saveText = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!textDraft?.value.trim()) {
@@ -185,36 +258,45 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
     : undefined;
 
   return (
-    <div className={`canvas-surface ${currentTool === 'text' ? 'canvas-text-mode' : ''}`}>
-      <canvas
-        ref={canvasRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={finishDrawing}
-        onPointerCancel={finishDrawing}
-        className="drawing-canvas"
-        aria-label="Collaborative drawing board"
-      />
-      {textDraft && (
-        <form
-          className="canvas-text-editor"
-          style={textEditorPosition}
-          onSubmit={saveText}
-        >
-          <input
-            ref={textInputRef}
-            value={textDraft.value}
-            onChange={(event) => setTextDraft({ ...textDraft, value: event.target.value })}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') setTextDraft(null);
-            }}
-            placeholder="Type and press Enter"
-            aria-label="Text to add to the board"
-            maxLength={500}
-          />
-          <button type="submit" aria-label="Add text to board">Add</button>
-        </form>
-      )}
+    <div
+      ref={viewportRef}
+      className={`canvas-scroll-viewport ${expanded ? 'canvas-scroll-expanded' : ''} ${spaceHeld ? 'canvas-space-held' : ''} ${isPanning ? 'canvas-is-panning' : ''}`}
+      onPointerDown={startPan}
+      onPointerMove={movePan}
+      onPointerUp={stopPan}
+      onPointerCancel={stopPan}
+    >
+      <div className={`canvas-surface ${currentTool === 'text' ? 'canvas-text-mode' : ''}`}>
+        <canvas
+          ref={canvasRef}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={finishDrawing}
+          onPointerCancel={finishDrawing}
+          className="drawing-canvas"
+          aria-label="Collaborative drawing board"
+        />
+        {textDraft && (
+          <form
+            className="canvas-text-editor"
+            style={textEditorPosition}
+            onSubmit={saveText}
+          >
+            <input
+              ref={textInputRef}
+              value={textDraft.value}
+              onChange={(event) => setTextDraft({ ...textDraft, value: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setTextDraft(null);
+              }}
+              placeholder="Type and press Enter"
+              aria-label="Text to add to the board"
+              maxLength={500}
+            />
+            <button type="submit" aria-label="Add text to board">Add</button>
+          </form>
+        )}
+      </div>
     </div>
   );
 };

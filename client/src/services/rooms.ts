@@ -27,3 +27,15 @@ export const createRoom = async ({ name, ownerId }: { name: string; ownerId: str
   }
   return response.json();
 };
+
+export const deleteRoom = async ({ roomId, ownerId }: { roomId: string; ownerId: string }): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/rooms/${encodeURIComponent(roomId)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ownerId }),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => null);
+    throw new Error(result?.error || 'Could not delete room. Please try again.');
+  }
+};
