@@ -1,10 +1,12 @@
+import { API_URL } from "../config";
+
 export interface Room {
   id: string;
   name: string;
   ownerId: string;
 }
 
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = `${API_URL}/api`;
 
 export const fetchRooms = async (): Promise<Room[]> => {
   const response = await fetch(`${API_BASE_URL}/rooms`);

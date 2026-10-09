@@ -78,6 +78,13 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
    npm run dev # (Assuming script is set in root or client)
    ```
 
+### Production frontend configuration
+Set `VITE_API_URL` in the frontend service's build environment to the backend's
+base URL (for example, `https://syncboard-i07g.onrender.com`) and redeploy the
+frontend. The value is embedded in the frontend at build time and is used for
+both REST API requests and Socket.IO connections. Local development falls back
+to `http://localhost:3000`.
+
 ---
 
 ## 🧪 Performance Optimizations
