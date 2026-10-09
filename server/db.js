@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -10,4 +11,8 @@ pool.on('error', (error) => {
   console.error('Unexpected PostgreSQL pool error:', error);
 });
 
-export const verifyDatabaseConnection = async () => pool.query('SELECT 1');
+export const initializeDatabase = async () => {
+  await pool.query('SELECT 1');
+  const schema = await readFile(new URL('./database/schema.sql', import.meta.url), 'utf8');
+  await pool.query(schema);
+};

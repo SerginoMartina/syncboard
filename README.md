@@ -48,24 +48,23 @@ SyncBoard's PostgreSQL objects live in the dedicated `syncboard` schema, so
 they do not share the default `public` namespace with other applications using
 the same database. The schema contains rooms, canvas shapes, and chat messages;
 deleting a room also deletes its shapes and messages. The server applies the
-DDL as a database initialization step when using Docker Compose. When deploying
-against an existing database, apply the migration with a role that can create
-schemas and tables:
+idempotent DDL on every startup, including when deployed against an existing
+database. Set `DATABASE_URL` to the PostgreSQL connection URL in the API
+service's environment. That role needs permission to create the schema and must
+own the SyncBoard tables so it can apply updates. This can be the database
+owner; all application tables remain isolated inside `syncboard`. Once
+deployed, the rooms endpoint is available at `/api/rooms`.
 
+You can also apply the same migration manually:
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/database/schema.sql
 ```
 
-For production, use a dedicated SyncBoard runtime role and grant it access only
-to this schema and its tables, rather than every application's objects. Run
-the schema migration separately with a deployment role; the runtime role only
-needs these data permissions:
-
-```sql
-GRANT USAGE ON SCHEMA syncboard TO syncboard_app;
-GRANT SELECT, INSERT, UPDATE, DELETE
-    ON ALL TABLES IN SCHEMA syncboard TO syncboard_app;
-```
+For production, use a dedicated SyncBoard database owner/role with access
+limited to this schema rather than other applications' objects. If your
+provider separates migration and runtime roles, apply the SQL file with the
+database owner before starting the API and ensure its configured startup role
+can run the idempotent schema updates.
 
 ## 🏗 Architecture Diagram
 

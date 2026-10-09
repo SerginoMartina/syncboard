@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import cors from 'cors';
 import { Server } from 'socket.io';
 import roomRoutes from './routes/rooms.js';
-import { verifyDatabaseConnection, pool } from './db.js';
+import { initializeDatabase, pool } from './db.js';
 
 const app = express();
 app.use(cors());
@@ -208,10 +208,10 @@ io.on('connection', (socket) => {
 const port = Number(process.env.PORT || 3000);
 
 try {
-  await verifyDatabaseConnection();
+  await initializeDatabase();
   httpServer.listen(port, () => console.log(`Server running on port ${port}`));
 } catch (error) {
-  console.error('Failed to connect to PostgreSQL:', error);
+  console.error('Failed to initialize SyncBoard database:', error);
   process.exitCode = 1;
   await pool.end();
 }
