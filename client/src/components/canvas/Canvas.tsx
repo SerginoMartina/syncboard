@@ -1,15 +1,10 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { useCanvasStore } from '../store/canvasStore';
-import { useSocket } from '../hooks/useSocket';
+import { useCanvasStore, type Cursor, type Shape } from '../../store/canvasStore';
+import { useSocket } from '../../hooks/useSocket';
 
 const Canvas: React.FC<{ roomId: string; userId: string }> = ({ roomId, userId }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [currentShape, setCurrentShape] = useState<{
-    type: 'line' | 'rect' | 'freehand';
-    points: [number, number][];
-    color: string;
-    width: number;
-  } | null>(null);
+  const [currentShape, setCurrentShape] = useState<Shape | null>(null);
 
   const { shapes, currentTool, currentColor, addShape, remoteCursors } = useCanvasStore();
   const { sendDraw, sendCursor } = useSocket(roomId);
@@ -46,7 +41,7 @@ const Canvas: React.FC<{ roomId: string; userId: string }> = ({ roomId, userId }
       }
 
       // Draw remote cursors
-      Object.values(remoteCursors).forEach((cursor) => {
+      Object.values(remoteCursors).forEach((cursor: Cursor) => {
         if (cursor.userId !== userId) {
           ctx.beginPath();
           ctx.fillStyle = cursor.color;
@@ -66,7 +61,7 @@ const Canvas: React.FC<{ roomId: string; userId: string }> = ({ roomId, userId }
     };
   }, [shapes, currentShape, remoteCursors, userId]);
 
-  const drawShape = (ctx: CanvasRenderingContext2D, shape: any) => {
+  const drawShape = (ctx: CanvasRenderingContext2D, shape: Shape) => {
     ctx.beginPath();
     ctx.strokeStyle = shape.color;
     ctx.lineWidth = shape.width;
@@ -94,6 +89,7 @@ const Canvas: React.FC<{ roomId: string; userId: string }> = ({ roomId, userId }
     const y = e.clientY - rect.top;
 
     setCurrentShape({
+      id: `shape-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type: currentTool,
       points: [[x, y]],
       color: currentColor,

@@ -46,6 +46,13 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('leave_room', (roomId) => {
+    if (roomId) {
+      socket.leave(roomId);
+      console.log(`User ${socket.id} left room: ${roomId}`);
+    }
+  });
+
   socket.on('draw', (data) => {
     const { roomId, shape } = data;
     if (roomId) {

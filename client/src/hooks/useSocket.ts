@@ -37,7 +37,9 @@ export const useSocket = (roomId: string | null) => {
       socket.off('disconnect');
       socket.off('draw');
       socket.off('cursor_move');
-      socket.leave(roomId);
+      if (roomId) {
+        socket.emit('leave_room', roomId);
+      }
     };
   }, [roomId, addShape, updateRemoteCursor]);
 
