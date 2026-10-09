@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUp, Check, Circle, Loader2, MessageCircle, Pencil, Plus, Radio, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Check, Circle, Loader2, MessageCircle, Minus, Pencil, Plus, Radio, RefreshCw, Square, Type } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
 import { useSocket, type ChatMessage, type GuestUser, type RoomUser } from './hooks/useSocket';
@@ -35,6 +35,7 @@ function Avatar({ name, color, size = 'normal' }: { name: string; color: string;
 
 function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; onExit: () => void }) {
   const [messageDraft, setMessageDraft] = useState('');
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const currentTool = useCanvasStore((state) => state.currentTool);
   const setTool = useCanvasStore((state) => state.setTool);
@@ -75,15 +76,26 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
             <h2>{room.name}</h2>
           </div>
         </div>
+        <button
+          className="mobile-chat-toggle"
+          onClick={() => setMobileChatOpen((open) => !open)}
+          aria-label={mobileChatOpen ? 'Back to board' : 'Open room chat'}
+        >
+          {mobileChatOpen ? <Pencil size={15} /> : <MessageCircle size={15} />}
+          {mobileChatOpen ? 'Board' : 'Chat'}
+        </button>
         <div className="presence-area">
+          <span className="online-indicator"><Circle size={8} fill="currentColor" /> Online</span>
           <div className="avatar-stack" aria-label={`${presence.length} people in this room`}>
-            {presence.slice(0, 5).map((member: RoomUser) => (
-              <Avatar key={member.socketId} name={member.name} color={member.color} size="small" />
+            {presence.map((member: RoomUser) => (
+              <span className="online-person" key={member.socketId}>
+                <Avatar name={member.name} color={member.color} size="small" />
+                <span>{member.name}</span>
+              </span>
             ))}
-            {presence.length > 5 && <span className="avatar avatar-overflow">+{presence.length - 5}</span>}
           </div>
           <div className="presence-copy">
-            <span>{presence.length} here now</span>
+            <span>{presence.length} {presence.length === 1 ? 'person' : 'people'} here</span>
             <span className={`connection-status ${isConnected ? 'is-connected' : ''}`}>
               <Circle size={7} fill="currentColor" />
               {isConnected ? 'Connected' : 'Connecting'}
@@ -92,11 +104,11 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
         </div>
       </div>
 
-      <div className="workbench">
+      <div className={`workbench ${mobileChatOpen ? 'mobile-chat-view' : ''}`}>
         <div className="canvas-column">
           <div className="canvas-toolbar">
             <div className="tool-select">
-              <Pencil size={15} />
+              {currentTool === 'line' ? <Minus size={15} /> : currentTool === 'rect' ? <Square size={15} /> : currentTool === 'text' ? <Type size={15} /> : <Pencil size={15} />}
               <select
                 aria-label="Drawing tool"
                 value={currentTool}
@@ -105,6 +117,7 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
                 <option value="freehand">Pen</option>
                 <option value="line">Line</option>
                 <option value="rect">Rectangle</option>
+                <option value="text">Text</option>
               </select>
             </div>
             <label className="color-control" title="Choose drawing color">
@@ -116,7 +129,7 @@ function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; on
               />
               <span>Color</span>
             </label>
-            <span className="toolbar-hint">Draw together, in real time</span>
+            <span className="toolbar-hint">{currentTool === 'line' ? 'Drag to draw a straight line' : currentTool === 'text' ? 'Click anywhere to add a text label' : 'Draw together, in real time'}</span>
           </div>
           <div className="canvas-frame">
             <Canvas userId={user.id} sendDraw={sendDraw} sendCursor={sendCursor} />

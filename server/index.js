@@ -76,7 +76,8 @@ io.on('connection', (socket) => {
 
       const [shapeResult, messageResult] = await Promise.all([
         pool.query(
-          `SELECT id, type, points, color, width, created_at AS "createdAt"
+          `SELECT id, type, points, color, width, text_content AS text,
+                  created_at AS "createdAt"
            FROM syncboard.canvas_shapes
            WHERE room_id = $1
            ORDER BY created_at, id`,
@@ -125,21 +126,26 @@ io.on('connection', (socket) => {
 
   socket.on('draw', async (shape) => {
     const roomId = socket.data.roomId;
+    const textShape = shape?.type === 'text';
     if (!roomId || typeof shape?.id !== 'string' ||
-        !['line', 'rect', 'freehand'].includes(shape.type) ||
+        !['line', 'rect', 'freehand', 'text'].includes(shape.type) ||
         !Array.isArray(shape.points) ||
         !shape.points.every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) ||
-        !colorIsValid(shape.color) || !Number.isFinite(shape.width) || shape.width <= 0) {
+        !colorIsValid(shape.color) || !Number.isFinite(shape.width) || shape.width <= 0 ||
+        (textShape && (typeof shape.text !== 'string' || !shape.text.trim() || shape.text.length > 500))) {
       socket.emit('action_error', 'Could not save that drawing.');
       return;
     }
 
     try {
       const { rows } = await pool.query(
-        `INSERT INTO syncboard.canvas_shapes (room_id, id, type, points, color, width)
-         VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-         RETURNING id, type, points, color, width, created_at AS "createdAt"`,
-        [roomId, shape.id, shape.type, JSON.stringify(shape.points), shape.color, shape.width],
+        `INSERT INTO syncboard.canvas_shapes
+           (room_id, id, type, points, color, width, text_content)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+         RETURNING id, type, points, color, width, text_content AS text,
+                   created_at AS "createdAt"`,
+        [roomId, shape.id, shape.type, JSON.stringify(shape.points), shape.color, shape.width,
+          textShape ? shape.text.trim() : null],
       );
       io.to(roomId).emit('draw', { roomId, shape: rows[0] });
     } catch (error) {

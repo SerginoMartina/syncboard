@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { useCanvasStore, type Cursor, type Shape } from '../../store/canvasStore';
+import React, { useEffect, useRef, useState } from 'react';
+import { useCanvasStore, type CanvasTool, type Cursor, type Shape } from '../../store/canvasStore';
 
 type CanvasProps = {
   userId: string;
@@ -7,9 +7,51 @@ type CanvasProps = {
   sendCursor: (x: number, y: number) => void;
 };
 
+type TextDraft = {
+  point: [number, number];
+  value: string;
+};
+
+const drawShape = (ctx: CanvasRenderingContext2D, shape: Shape) => {
+  const first = shape.points[0];
+  const last = shape.points[shape.points.length - 1];
+  if (!first || !last) return;
+
+  if (shape.type === 'text') {
+    ctx.fillStyle = shape.color;
+    ctx.font = `600 ${Math.max(14, shape.width * 8)}px Inter, ui-sans-serif, system-ui, sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.fillText(shape.text || '', first[0], first[1]);
+    return;
+  }
+
+  ctx.beginPath();
+  ctx.strokeStyle = shape.color;
+  ctx.lineWidth = shape.width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (shape.type === 'line') {
+    ctx.moveTo(first[0], first[1]);
+    ctx.lineTo(last[0], last[1]);
+  } else if (shape.type === 'freehand') {
+    if (shape.points.length < 2) return;
+    ctx.moveTo(first[0], first[1]);
+    for (let index = 1; index < shape.points.length; index++) {
+      ctx.lineTo(shape.points[index][0], shape.points[index][1]);
+    }
+  } else {
+    ctx.rect(first[0], first[1], last[0] - first[0], last[1] - first[1]);
+  }
+  ctx.stroke();
+};
+
 const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
+  const drawingRef = useRef<Shape | null>(null);
   const [currentShape, setCurrentShape] = useState<Shape | null>(null);
+  const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const { shapes, currentTool, currentColor, remoteCursors } = useCanvasStore();
 
   useEffect(() => {
@@ -17,110 +59,163 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor }) => {
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
 
-    const resizeCanvas = () => {
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
-    };
-
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
-    let animationFrameId: number;
-
     const render = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const { width, height } = canvas.getBoundingClientRect();
+      const pixelRatio = window.devicePixelRatio || 1;
+      const targetWidth = Math.round(width * pixelRatio);
+      const targetHeight = Math.round(height * pixelRatio);
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+      }
+
+      ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
       shapes.forEach((shape) => drawShape(ctx, shape));
       if (currentShape) drawShape(ctx, currentShape);
 
       Object.values(remoteCursors).forEach((cursor: Cursor) => {
-        if (cursor.userId !== userId) {
-          ctx.beginPath();
-          ctx.fillStyle = cursor.color;
-          ctx.arc(cursor.x, cursor.y, 5, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        if (cursor.userId === userId) return;
+        ctx.beginPath();
+        ctx.fillStyle = cursor.color;
+        ctx.arc(cursor.x, cursor.y, 5, 0, Math.PI * 2);
+        ctx.fill();
       });
 
-      animationFrameId = requestAnimationFrame(render);
     };
 
     render();
+    const resizeObserver = new ResizeObserver(() => {
+      render();
+    });
+    resizeObserver.observe(canvas);
 
     return () => {
-      window.removeEventListener('resize', resizeCanvas);
-      cancelAnimationFrame(animationFrameId);
+      resizeObserver.disconnect();
     };
   }, [shapes, currentShape, remoteCursors, userId]);
 
-  const drawShape = (ctx: CanvasRenderingContext2D, shape: Shape) => {
-    ctx.beginPath();
-    ctx.strokeStyle = shape.color;
-    ctx.lineWidth = shape.width;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+  useEffect(() => {
+    if (textDraft) textInputRef.current?.focus();
+  }, [textDraft]);
 
-    if (shape.type === 'freehand' || shape.type === 'line') {
-      if (shape.points.length < 2) return;
-      ctx.moveTo(shape.points[0][0], shape.points[0][1]);
-      for (let index = 1; index < shape.points.length; index++) {
-        ctx.lineTo(shape.points[index][0], shape.points[index][1]);
-      }
-    } else if (shape.type === 'rect') {
-      const first = shape.points[0];
-      const last = shape.points[shape.points.length - 1];
-      if (!first || !last) return;
-      ctx.rect(first[0], first[1], last[0] - first[0], last[1] - first[1]);
-    }
-    ctx.stroke();
-  };
-
-  const pointFromEvent = (event: React.MouseEvent<HTMLCanvasElement>) => {
+  const pointFromEvent = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return null;
     return [event.clientX - rect.left, event.clientY - rect.top] as [number, number];
   };
 
-  const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
+  const makeShape = (tool: CanvasTool, point: [number, number]): Shape => ({
+    id: crypto.randomUUID(),
+    type: tool === 'text' ? 'freehand' : tool,
+    points: [point],
+    color: currentColor,
+    width: 2,
+  });
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
     const point = pointFromEvent(event);
     if (!point) return;
-    setCurrentShape({
-      id: crypto.randomUUID(),
-      type: currentTool,
-      points: [point],
-      color: currentColor,
-      width: 2,
-    });
+
+    if (currentTool === 'text') {
+      setTextDraft({ point, value: '' });
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const shape = makeShape(currentTool, point);
+    drawingRef.current = shape;
+    setCurrentShape(shape);
   };
 
-  const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const point = pointFromEvent(event);
     if (!point) return;
     sendCursor(point[0], point[1]);
-    if (!currentShape) return;
+    const shape = drawingRef.current;
+    if (!shape) return;
 
-    setCurrentShape({
-      ...currentShape,
-      points: currentTool === 'freehand' || currentTool === 'line'
-        ? [...currentShape.points, point]
-        : [currentShape.points[0], point],
-    });
+    const nextPoints: [number, number][] = shape.type === 'freehand'
+      ? [...shape.points, point]
+      : [shape.points[0], point];
+    const nextShape = { ...shape, points: nextPoints };
+    drawingRef.current = nextShape;
+    setCurrentShape(nextShape);
   };
 
-  const finishDrawing = () => {
-    if (!currentShape) return;
-    sendDraw(currentShape);
+  const finishDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const shape = drawingRef.current;
+    if (!shape) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (shape.type !== 'freehand' && shape.points.length === 1) {
+      const point = pointFromEvent(event);
+      if (point) shape.points = [shape.points[0], point];
+    }
+    drawingRef.current = null;
     setCurrentShape(null);
+    sendDraw(shape);
   };
+
+  const saveText = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!textDraft?.value.trim()) {
+      setTextDraft(null);
+      return;
+    }
+    sendDraw({
+      id: crypto.randomUUID(),
+      type: 'text',
+      points: [textDraft.point],
+      text: textDraft.value.trim(),
+      color: currentColor,
+      width: 2,
+    });
+    setTextDraft(null);
+  };
+
+  const textEditorPosition = textDraft && canvasRef.current
+    ? {
+      left: Math.min(textDraft.point[0], Math.max(8, canvasRef.current.clientWidth - 280)),
+      top: Math.min(Math.max(24, textDraft.point[1]), Math.max(24, canvasRef.current.clientHeight - 20)),
+    }
+    : undefined;
 
   return (
-    <canvas
-      ref={canvasRef}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={finishDrawing}
-      onMouseLeave={finishDrawing}
-      className="drawing-canvas"
-      aria-label="Collaborative drawing board"
-    />
+    <div className={`canvas-surface ${currentTool === 'text' ? 'canvas-text-mode' : ''}`}>
+      <canvas
+        ref={canvasRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrawing}
+        onPointerCancel={finishDrawing}
+        className="drawing-canvas"
+        aria-label="Collaborative drawing board"
+      />
+      {textDraft && (
+        <form
+          className="canvas-text-editor"
+          style={textEditorPosition}
+          onSubmit={saveText}
+        >
+          <input
+            ref={textInputRef}
+            value={textDraft.value}
+            onChange={(event) => setTextDraft({ ...textDraft, value: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setTextDraft(null);
+            }}
+            placeholder="Type and press Enter"
+            aria-label="Text to add to the board"
+            maxLength={500}
+          />
+          <button type="submit" aria-label="Add text to board">Add</button>
+        </form>
+      )}
+    </div>
   );
 };
 

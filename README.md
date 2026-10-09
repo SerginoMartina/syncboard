@@ -1,7 +1,7 @@
 # SyncBoard 🎨
 **A real-time collaborative whiteboard for sharing ideas with your team.**
 
-SyncBoard is a collaborative workspace where multiple users can draw, create shapes, and chat in real time. Room content is stored in PostgreSQL and restored when collaborators return.
+SyncBoard is a collaborative workspace where multiple users can draw freehand, add straight lines and text, and chat in real time. Room content is stored in PostgreSQL and restored when collaborators return. The room header shows which collaborators are online.
 
 ---
 

@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 
+export type CanvasTool = 'line' | 'rect' | 'freehand' | 'text';
+
 export type Shape = {
   id: string;
-  type: 'line' | 'rect' | 'freehand';
+  type: CanvasTool;
   points: [number, number][];
   color: string;
   width: number;
+  text?: string;
 };
 
 export type Cursor = {
@@ -17,12 +20,12 @@ export type Cursor = {
 
 export interface CanvasState {
   shapes: Shape[];
-  currentTool: 'line' | 'rect' | 'freehand';
+  currentTool: CanvasTool;
   isDrawing: boolean;
   currentColor: string;
   remoteCursors: Record<string, Cursor>; // Map userId to Cursor
   
-  setTool: (tool: 'line' | 'rect' | 'freehand') => void;
+  setTool: (tool: CanvasTool) => void;
   set_color: (color: string) => void;
   addShape: (shape: Shape) => void;
   setShapes: (shapes: Shape[]) => void;
@@ -35,7 +38,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   shapes: [],
   currentTool: 'freehand',
   isDrawing: false,
-  currentColor: '#3b82f6',
+  currentColor: '#d94f55',
   remoteCursors: {},
 
   setTool: (tool) => set({ currentTool: tool }),
