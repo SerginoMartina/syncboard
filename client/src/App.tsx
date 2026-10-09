@@ -1,95 +1,346 @@
-import React, { useState, useEffect } from 'react';
-import { useRooms } from './hooks/useRooms';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ArrowLeft, ArrowUp, Check, Circle, Loader2, MessageCircle, Pencil, Plus, Radio, RefreshCw } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
+import { useRooms } from './hooks/useRooms';
+import { useSocket, type ChatMessage, type GuestUser, type RoomUser } from './hooks/useSocket';
+import type { Room } from './services/rooms';
 import { useCanvasStore } from './store/canvasStore';
 
-function App() {
-  const { data: rooms, isLoading, isError, createRoom } = useRooms();
-  const { currentTool, setTool, currentColor, set_color } = useCanvasStore();
-  
-  const [roomName, setRoomName] = useState('');
-  const [roomId, setRoomId] = useState('main-room');
-  const [userId] = useState(`user-${Math.random().toString(36).substr(2, 9)}`);
+const makeGuest = (): GuestUser => {
+  const id = localStorage.getItem('syncboard-user-id') || crypto.randomUUID();
+  localStorage.setItem('syncboard-user-id', id);
+  const palette = ['#4f8cff', '#c084fc', '#f97316', '#22c55e', '#ec4899', '#06b6d4'];
+  const colorIndex = [...id].reduce((total, character) => total + character.charCodeAt(0), 0) % palette.length;
+  return {
+    id,
+    name: localStorage.getItem('syncboard-user-name') || '',
+    color: localStorage.getItem('syncboard-user-color') || palette[colorIndex],
+  };
+};
 
-  if (isLoading) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">Loading rooms...</div>;
-  if (isError) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">Error loading rooms.</div>;
+const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
+
+function Avatar({ name, color, size = 'normal' }: { name: string; color: string; size?: 'normal' | 'small' }) {
+  return (
+    <span
+      className={`avatar avatar-${size}`}
+      style={{ backgroundColor: color }}
+      title={name}
+      aria-label={name}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
+function RoomWorkspace({ room, user, onExit }: { room: Room; user: GuestUser; onExit: () => void }) {
+  const [messageDraft, setMessageDraft] = useState('');
+  const endOfMessagesRef = useRef<HTMLDivElement>(null);
+  const currentTool = useCanvasStore((state) => state.currentTool);
+  const setTool = useCanvasStore((state) => state.setTool);
+  const currentColor = useCanvasStore((state) => state.currentColor);
+  const setColor = useCanvasStore((state) => state.set_color);
+  const {
+    isConnected,
+    presence,
+    messages,
+    error,
+    clearError,
+    sendDraw,
+    sendCursor,
+    sendMessage,
+  } = useSocket(room.id, user);
+
+  useEffect(() => {
+    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length]);
+
+  const handleSendMessage = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = messageDraft.trim();
+    if (!body) return;
+    sendMessage(body);
+    setMessageDraft('');
+  };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="max-w-6xl mx-auto">
-        <header className="flex justify-between items-center mb-8">
+    <section className="workspace" aria-label={`Room ${room.name}`}>
+      <div className="room-heading">
+        <div className="room-heading-copy">
+          <button className="back-button" onClick={onExit} aria-label="Back to rooms" title="Back to rooms">
+            <ArrowLeft size={18} />
+          </button>
           <div>
-            <h1 className="text-3xl font-bold">SyncBoard</h1>
-            <p className="text-sm text-gray-400">ID: {userId}</p>
+            <span className="eyebrow">COLLABORATIVE BOARD</span>
+            <h2>{room.name}</h2>
           </div>
-          <div className="flex gap-4">
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-400">Tool</label>
-              <select 
-                value={currentTool} 
-                onChange={(e) => setTool(e.target.value as any)}
-                className="bg-gray-800 p-1 rounded"
+        </div>
+        <div className="presence-area">
+          <div className="avatar-stack" aria-label={`${presence.length} people in this room`}>
+            {presence.slice(0, 5).map((member: RoomUser) => (
+              <Avatar key={member.socketId} name={member.name} color={member.color} size="small" />
+            ))}
+            {presence.length > 5 && <span className="avatar avatar-overflow">+{presence.length - 5}</span>}
+          </div>
+          <div className="presence-copy">
+            <span>{presence.length} here now</span>
+            <span className={`connection-status ${isConnected ? 'is-connected' : ''}`}>
+              <Circle size={7} fill="currentColor" />
+              {isConnected ? 'Connected' : 'Connecting'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="workbench">
+        <div className="canvas-column">
+          <div className="canvas-toolbar">
+            <div className="tool-select">
+              <Pencil size={15} />
+              <select
+                aria-label="Drawing tool"
+                value={currentTool}
+                onChange={(event) => setTool(event.target.value as typeof currentTool)}
               >
-                <option value="freehand">Freehand</option>
+                <option value="freehand">Pen</option>
                 <option value="line">Line</option>
                 <option value="rect">Rectangle</option>
               </select>
             </div>
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-400">Color</label>
-              <input 
-                type="color" 
-                value={currentColor} 
-                onChange={(e) => set_color(e.target.value)}
-                className="bg-gray-800 p-1 rounded"
+            <label className="color-control" title="Choose drawing color">
+              <input
+                type="color"
+                value={currentColor}
+                onChange={(event) => setColor(event.target.value)}
+                aria-label="Drawing color"
+              />
+              <span>Color</span>
+            </label>
+            <span className="toolbar-hint">Draw together, in real time</span>
+          </div>
+          <div className="canvas-frame">
+            <Canvas userId={user.id} sendDraw={sendDraw} sendCursor={sendCursor} />
+          </div>
+          {error && (
+            <button className="inline-error" onClick={clearError} role="alert">
+              {error} <span>Dismiss</span>
+            </button>
+          )}
+        </div>
+
+        <aside className="chat-panel" aria-label="Room chat">
+          <div className="chat-header">
+            <div className="chat-title-icon"><MessageCircle size={16} /></div>
+            <div>
+              <h3>Room chat</h3>
+              <p>Say hello to your collaborators</p>
+            </div>
+          </div>
+          <div className="chat-messages" aria-live="polite">
+            {messages.length === 0 ? (
+              <div className="chat-empty">
+                <span className="chat-empty-icon"><MessageCircle size={19} /></span>
+                <strong>Start the conversation</strong>
+                <span>Messages are saved in this room.</span>
+              </div>
+            ) : messages.map((message: ChatMessage) => (
+              <article className={`chat-message ${message.userId === user.id ? 'message-own' : ''}`} key={message.id}>
+                <Avatar name={message.name} color={message.color} size="small" />
+                <div className="message-content">
+                  <div className="message-meta">
+                    <strong>{message.name}</strong>
+                    <time dateTime={message.createdAt}>
+                      {new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                    </time>
+                  </div>
+                  <p>{message.body}</p>
+                </div>
+              </article>
+            ))}
+            <div ref={endOfMessagesRef} />
+          </div>
+          <form className="chat-composer" onSubmit={handleSendMessage}>
+            <textarea
+              value={messageDraft}
+              onChange={(event) => setMessageDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder={`Message as ${user.name}...`}
+              maxLength={2000}
+              rows={2}
+              aria-label="Write a chat message"
+            />
+            <button type="submit" disabled={!messageDraft.trim()} aria-label="Send message">
+              <ArrowUp size={17} />
+            </button>
+            <span>Enter to send · Shift + Enter for a new line</span>
+          </form>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function App() {
+  const { data: rooms, isLoading, isError, error, refetch, createRoom, isCreatingRoom, createRoomError } = useRooms();
+  const [user, setUser] = useState<GuestUser>(makeGuest);
+  const [nameDraft, setNameDraft] = useState(user.name);
+  const [roomName, setRoomName] = useState('');
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [roomFormError, setRoomFormError] = useState('');
+  const activeRoom = rooms?.find((room) => room.id === activeRoomId) ?? null;
+
+  const saveName = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = nameDraft.trim().slice(0, 32);
+    if (!name) return;
+    localStorage.setItem('syncboard-user-name', name);
+    setUser((current) => ({ ...current, name }));
+  };
+
+  const handleCreateRoom = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = roomName.trim();
+    if (!name || !user.name) return;
+    setRoomFormError('');
+    try {
+      const room = await createRoom({ name, ownerId: user.id });
+      setRoomName('');
+      setActiveRoomId(room.id);
+    } catch (createError) {
+      setRoomFormError(createError instanceof Error ? createError.message : 'Could not create the room.');
+    }
+  };
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark"><Pencil size={18} /></span>
+          <span>syncboard</span>
+        </div>
+
+        <div className="sidebar-section">
+          <div className="section-heading">
+            <span>YOUR WORKSPACES</span>
+            <span className="room-count">{rooms?.length ?? 0}</span>
+          </div>
+          <form className="create-room-form" onSubmit={handleCreateRoom}>
+            <label htmlFor="new-room-name">Create a room</label>
+            <div className="create-room-input">
+              <input
+                id="new-room-name"
+                value={roomName}
+                onChange={(event) => setRoomName(event.target.value)}
+                placeholder="e.g. Product ideas"
+                maxLength={80}
+                required
+              />
+              <button type="submit" disabled={!user.name || !roomName.trim() || isCreatingRoom} aria-label="Create room">
+                {isCreatingRoom ? <Loader2 size={17} className="spin" /> : <Plus size={17} />}
+              </button>
+            </div>
+            {!user.name && <p className="form-hint">Add your name below to create a room.</p>}
+            {(roomFormError || createRoomError) && <p className="form-error" role="alert">{roomFormError || createRoomError?.message}</p>}
+          </form>
+
+          <nav className="room-list" aria-label="Available rooms">
+            {isLoading ? (
+              <div className="list-state"><Loader2 size={16} className="spin" /> Loading rooms</div>
+            ) : isError ? (
+              <div className="list-state list-error">
+                <span>{error instanceof Error ? error.message : 'Could not load rooms.'}</span>
+                <button onClick={() => void refetch()}><RefreshCw size={14} /> Retry</button>
+              </div>
+            ) : rooms?.length ? rooms.map((room) => (
+              <button
+                type="button"
+                className={`room-link ${activeRoomId === room.id ? 'room-link-active' : ''}`}
+                key={room.id}
+                onClick={() => setActiveRoomId(room.id)}
+                disabled={!user.name}
+                title={!user.name ? 'Enter your name to join' : room.name}
+              >
+                <span className="room-link-icon">#</span>
+                <span className="room-link-name">{room.name}</span>
+              </button>
+            )) : (
+              <div className="list-empty">No rooms yet. Create one to get started.</div>
+            )}
+          </nav>
+        </div>
+
+        <form className="profile-card" onSubmit={saveName}>
+          <div className="profile-heading">YOUR PROFILE</div>
+          <div className="profile-row">
+            <Avatar name={user.name || 'You'} color={user.color} />
+            <div className="profile-fields">
+              <label htmlFor="display-name">Display name</label>
+              <input
+                id="display-name"
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                placeholder="What should we call you?"
+                maxLength={32}
+                required
               />
             </div>
+          </div>
+          <button className="save-profile-button" type="submit" disabled={!nameDraft.trim() || nameDraft.trim() === user.name}>
+            {nameDraft.trim() === user.name ? <><Check size={14} /> Name saved</> : 'Save name'}
+          </button>
+        </form>
+      </aside>
+
+      <div className="main-area">
+        <header className="topbar">
+          <div className="breadcrumb">
+            <span>Workspace</span>
+            {activeRoom && <><span className="breadcrumb-divider">/</span><strong>{activeRoom.name}</strong></>}
+          </div>
+          <div className="topbar-user">
+            <Radio size={14} />
+            <span>{user.name || 'Guest'}</span>
+            <Avatar name={user.name || 'You'} color={user.color} size="small" />
           </div>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-3">
-            <Canvas roomId={roomId} userId={userId} />
-          </div>
-
-          <div className="lg:col-span-1 bg-gray-800 p-6 rounded-lg border border-gray-700">
-            <h2 className="text-xl mb-4">Rooms</h2>
-            <div className="mb-4">
-              <label className="text-xs text-gray-400">Room ID</label>
-              <input
-                type="text"
-                value={roomId}
-                onChange={(e) => setRoomId(e.target.value)}
-                className="w-full px-3 py-2 rounded bg-gray-700 border border-gray-600 mb-2"
-              />
+        {activeRoom ? (
+          <RoomWorkspace room={activeRoom} user={user} onExit={() => setActiveRoomId(null)} />
+        ) : (
+          <section className="welcome-panel">
+            <div className="welcome-content">
+              <div className="welcome-art" aria-hidden="true">
+                <span className="art-dot art-dot-one" />
+                <span className="art-dot art-dot-two" />
+                <span className="art-dot art-dot-three" />
+                <span className="art-board"><Pencil size={34} strokeWidth={1.5} /></span>
+              </div>
+              <span className="eyebrow">A LITTLE SPACE TO THINK TOGETHER</span>
+              <h1>{!user.name ? 'First, what should we call you?' : rooms?.length ? 'Pick up where ideas happen.' : 'Make room for good ideas.'}</h1>
+              <p>
+                {!user.name
+                  ? 'Add your name in the sidebar, then join a room or create one with your team.'
+                  : rooms?.length
+                    ? 'Choose a workspace on the left to open its board and chat with everyone there.'
+                    : 'There are no boards yet. Create your first room on the left and invite your collaborators.'}
+              </p>
+              {!rooms?.length && !isLoading && !isError && (
+                <div className="welcome-tip"><span>✦</span> Every room has its own saved board and conversation.</div>
+              )}
             </div>
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              if (roomName.trim()) {
-                createRoom(roomName);
-                setRoomName('');
-              }
-            }} className="mb-4">
-              <input
-                type="text"
-                value={roomName}
-                onChange={(e) => setRoomName(e.target.value)}
-                placeholder="New room name"
-                className="w-full px-3 py-2 rounded bg-gray-700 border border-gray-600 mb-2"
-              />
-              <button type="submit" className="w-full bg-blue-600 py-2 rounded hover:bg-blue-700">
-                Create
-              </button>
-            </form>
-            <ul className="space-y-2">
-              {rooms?.map((room) => (
-                <li key={room.id} className="p-2 bg-gray-700 rounded">{room.name}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
+          </section>
+        )}
+        <footer className="app-footer">
+          <span>Ideas are better together.</span>
+          <span>SyncBoard <span className="footer-dot">·</span> collaborative canvas</span>
+        </footer>
       </div>
-    </div>
+    </main>
   );
 }
 

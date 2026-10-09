@@ -1,21 +1,30 @@
-version: '3.8'
-
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=syncboard
+      - POSTGRES_USER=syncboard
+      - POSTGRES_PASSWORD=syncboard
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/database/schema.sql:/docker-entrypoint-initdb.d/001-syncboard.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syncboard -d syncboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   server:
     build: ./server
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=development
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgres://syncboard:syncboard@postgres:5432/syncboard
     depends_on:
-      - redis
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+      postgres:
+        condition: service_healthy
 
 volumes:
-  redis_data:
+  postgres_data:

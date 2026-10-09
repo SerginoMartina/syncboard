@@ -1,96 +1,211 @@
+import { randomUUID } from 'node:crypto';
 import express from 'express';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
+import { createServer } from 'node:http';
 import cors from 'cors';
+import { Server } from 'socket.io';
 import roomRoutes from './routes/rooms.js';
-import redis from 'redis';
+import { verifyDatabaseConnection, pool } from './db.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Redis Setup
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
-
-redisClient.on('error', (err) => console.error('Redis Error:', err));
-redisClient.connect().then(() => {
-  console.log('Connected to Redis');
-});
+app.use('/api/rooms', roomRoutes);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    origin: process.env.CLIENT_ORIGIN || '*',
+    methods: ['GET', 'POST'],
+  },
 });
 
-// Routes
-app.use('/api/rooms', roomRoutes);
+const activeUsers = new Map();
+const nameIsValid = (name) => typeof name === 'string' && name.trim().length > 0 && name.trim().length <= 32;
+const colorIsValid = (color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);
+
+const presenceForRoom = (roomId) => [...activeUsers.values()]
+  .filter((user) => user.roomId === roomId)
+  .map(({ userId, name, color, socketId }) => ({ userId, name, color, socketId }));
+
+const publishPresence = (roomId) => {
+  io.to(roomId).emit('presence_update', {
+    roomId,
+    users: presenceForRoom(roomId),
+  });
+};
 
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  socket.on('join_room', async (request) => {
+    const joinAttempt = (socket.data.joinAttempt || 0) + 1;
+    socket.data.joinAttempt = joinAttempt;
+    socket.data.requestedRoomId = request?.roomId;
+    const roomId = typeof request?.roomId === 'string' ? request.roomId : '';
+    const user = request?.user;
+    if (!roomId || !nameIsValid(user?.name) || !colorIsValid(user?.color) || typeof user?.id !== 'string' || !user.id) {
+      socket.emit('action_error', 'Enter a valid name before joining a room.');
+      return;
+    }
 
-  socket.on('join_room', (roomId) => {
-    socket.join(roomId);
-    console.log(`User ${socket.id} joined room: ${roomId}`);
-    
-    // Subscribe to this room's channel in Redis
-    const channel = `draw:${roomId}`;
-    const subscriber = redisClient.duplicate();
-    subscriber.connect().then(() => {
-      subscriber.subscribe(channel);
-      console.log(`Subscribed to Redis channel: ${channel}`);
-    });
+    try {
+      const { rows: roomRows } = await pool.query(
+        'SELECT id FROM syncboard.rooms WHERE id = $1',
+        [roomId],
+      );
+      if (socket.data.joinAttempt !== joinAttempt) return;
+      if (!roomRows.length) {
+        socket.emit('room_not_found', roomId);
+        return;
+      }
+
+      const previousRoomId = socket.data.roomId;
+      if (previousRoomId) {
+        await socket.leave(previousRoomId);
+        activeUsers.delete(socket.id);
+        publishPresence(previousRoomId);
+      }
+
+      await socket.join(roomId);
+      socket.data.roomId = roomId;
+      activeUsers.set(socket.id, {
+        socketId: socket.id,
+        roomId,
+        userId: user.id,
+        name: user.name.trim(),
+        color: user.color,
+      });
+
+      const [shapeResult, messageResult] = await Promise.all([
+        pool.query(
+          `SELECT id, type, points, color, width, created_at AS "createdAt"
+           FROM syncboard.canvas_shapes
+           WHERE room_id = $1
+           ORDER BY created_at, id`,
+          [roomId],
+        ),
+        pool.query(
+          `SELECT id, user_id AS "userId", user_name AS name, user_color AS color,
+                  body, created_at AS "createdAt"
+           FROM syncboard.chat_messages
+           WHERE room_id = $1
+           ORDER BY created_at DESC, id DESC
+           LIMIT 100`,
+          [roomId],
+        ),
+      ]);
+
+      if (socket.data.joinAttempt !== joinAttempt) return;
+      socket.emit('room_state', {
+        roomId,
+        shapes: shapeResult.rows,
+        messages: messageResult.rows.reverse(),
+        presence: presenceForRoom(roomId),
+      });
+      publishPresence(roomId);
+    } catch (error) {
+      console.error('Failed to join room:', error);
+      if (socket.data.joinAttempt === joinAttempt) {
+        socket.emit('action_error', 'Could not join this room. Please try again.');
+      }
+    }
   });
 
   socket.on('leave_room', (roomId) => {
-    if (roomId) {
+    if (typeof roomId !== 'string') return;
+    if (socket.data.requestedRoomId === roomId) {
+      socket.data.joinAttempt = (socket.data.joinAttempt || 0) + 1;
+      socket.data.requestedRoomId = null;
+    }
+    if (socket.data.roomId === roomId) {
       socket.leave(roomId);
-      console.log(`User ${socket.id} left room: ${roomId}`);
+      socket.data.roomId = null;
+      activeUsers.delete(socket.id);
+      publishPresence(roomId);
     }
   });
 
-  socket.on('draw', (data) => {
-    const { roomId, shape } = data;
-    if (roomId) {
-      // Publish the draw event to Redis
-      redisClient.publish(`draw:${roomId}`, JSON.stringify(shape));
+  socket.on('draw', async (shape) => {
+    const roomId = socket.data.roomId;
+    if (!roomId || typeof shape?.id !== 'string' ||
+        !['line', 'rect', 'freehand'].includes(shape.type) ||
+        !Array.isArray(shape.points) ||
+        !shape.points.every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) ||
+        !colorIsValid(shape.color) || !Number.isFinite(shape.width) || shape.width <= 0) {
+      socket.emit('action_error', 'Could not save that drawing.');
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO syncboard.canvas_shapes (room_id, id, type, points, color, width)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+         RETURNING id, type, points, color, width, created_at AS "createdAt"`,
+        [roomId, shape.id, shape.type, JSON.stringify(shape.points), shape.color, shape.width],
+      );
+      io.to(roomId).emit('draw', { roomId, shape: rows[0] });
+    } catch (error) {
+      console.error('Failed to save drawing:', error);
+      socket.emit('action_error', 'Could not save that drawing.');
     }
   });
 
-  // Listen for messages from Redis and broadcast to local sockets
-  // We need to handle the fact that Redis is sending us data that should go to local sockets
-  // This is a simplified version of the horizontal scaling logic
-  // For a production app, you'd want to manage these subscribers more gracefully
-  // but this demonstrates the core Pub/Sub pattern.
-  
-  // To handle the actual message from Redis, we'd typically have a global listener
-  // that knows which rooms are active. For this project, we'll use a listener
-  // that checks if the socket is in the room.
-  
+  socket.on('chat_message', async (body) => {
+    const roomId = socket.data.roomId;
+    const user = activeUsers.get(socket.id);
+    const message = typeof body === 'string' ? body.trim() : '';
+    if (!roomId || !user || !message || message.length > 2000) {
+      socket.emit('action_error', 'Messages must be between 1 and 2000 characters.');
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO syncboard.chat_messages
+           (id, room_id, user_id, user_name, user_color, body)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, user_id AS "userId", user_name AS name,
+                   user_color AS color, body, created_at AS "createdAt"`,
+        [randomUUID(), roomId, user.userId, user.name, user.color, message],
+      );
+      io.to(roomId).emit('chat_message', { roomId, message: rows[0] });
+    } catch (error) {
+      console.error('Failed to save chat message:', error);
+      socket.emit('action_error', 'Could not send your message.');
+    }
+  });
+
+  socket.on('cursor_move', (cursor) => {
+    const roomId = socket.data.roomId;
+    const user = activeUsers.get(socket.id);
+    if (!roomId || !user || !Number.isFinite(cursor?.x) || !Number.isFinite(cursor?.y)) return;
+    socket.to(roomId).emit('cursor_move', {
+      roomId,
+      cursor: {
+        userId: user.userId,
+        x: cursor.x,
+        y: cursor.y,
+        color: user.color,
+      },
+    });
+  });
+
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
+    const roomId = socket.data.roomId;
+    socket.data.joinAttempt = (socket.data.joinAttempt || 0) + 1;
+    socket.data.requestedRoomId = null;
+    if (roomId) {
+      activeUsers.delete(socket.id);
+      publishPresence(roomId);
+    }
   });
 });
 
-// Global Redis Listener for drawing
-// We need a way to map roomId to the io instance. Since we're in one process, 
-// we can just broadcast to the room.
-redisClient.on('message', (channel, message) => {
-  if (channel.startsWith('draw:')) {
-    const roomId = channel.split(':')[1];
-    const shape = JSON.parse(message);
-    // Broadcast to everyone in the room except the sender
-    // Note: We don't have the sender ID easily here without more complex logic,
-    // but io.to(roomId).emit handles broadcasting to everyone in that room.
-    io.to(roomId).emit('draw', shape);
-  }
-});
+const port = Number(process.env.PORT || 3000);
 
-const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+try {
+  await verifyDatabaseConnection();
+  httpServer.listen(port, () => console.log(`Server running on port ${port}`));
+} catch (error) {
+  console.error('Failed to connect to PostgreSQL:', error);
+  process.exitCode = 1;
+  await pool.end();
+}

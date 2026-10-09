@@ -1,67 +1,166 @@
-import { useEffect, useState } from "react";
-import { io, Socket } from "socket.io-client";
-import { API_URL } from "../config";
+import { useCallback, useEffect, useState } from 'react';
+import { io, type Socket } from 'socket.io-client';
+import { API_URL } from '../config';
 import {
   useCanvasStore,
   type Cursor,
   type Shape,
-} from "../store/canvasStore";
+} from '../store/canvasStore';
 
-const socket: Socket = io(API_URL);
+export type RoomUser = {
+  userId: string;
+  name: string;
+  color: string;
+  socketId: string;
+};
 
-export const useSocket = (roomId: string | null) => {
-  const [isConnected, setIsConnected] = useState(false);
+export type ChatMessage = {
+  id: string;
+  userId: string;
+  name: string;
+  color: string;
+  body: string;
+  createdAt: string;
+};
+
+export type GuestUser = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+const socket: Socket = io(API_URL, { autoConnect: false });
+
+export const useSocket = (roomId: string, user: GuestUser) => {
+  const [isConnected, setIsConnected] = useState(socket.connected);
+  const [presence, setPresence] = useState<RoomUser[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [error, setError] = useState('');
   const addShape = useCanvasStore((state) => state.addShape);
-  const updateRemoteCursor = useCanvasStore(
-    (state) => state.updateRemoteCursor,
-  );
+  const setShapes = useCanvasStore((state) => state.setShapes);
+  const updateRemoteCursor = useCanvasStore((state) => state.updateRemoteCursor);
+  const setRemoteCursors = useCanvasStore((state) => state.setRemoteCursors);
 
   useEffect(() => {
-    if (!roomId) {
-      setIsConnected(false);
-      return;
-    }
+    setShapes([]);
+    setPresence([]);
+    setMessages([]);
+    setError('');
 
-    const handleConnect = () => {
+    const joinRoom = () => {
       setIsConnected(true);
-      socket.emit("join_room", roomId);
+      socket.emit('join_room', { roomId, user });
     };
     const handleDisconnect = () => setIsConnected(false);
-    const handleDraw = (shape: Shape) => addShape(shape);
-    const handleCursorMove = (cursor: Cursor) => updateRemoteCursor(cursor);
+    const handleRoomState = (state: {
+      roomId: string;
+      shapes: Shape[];
+      messages: ChatMessage[];
+      presence: RoomUser[];
+    }) => {
+      if (state.roomId !== roomId) return;
+      const shapesById = new Map(state.shapes.map((shape) => [shape.id, shape]));
+      useCanvasStore.getState().shapes.forEach((shape) => shapesById.set(shape.id, shape));
+      setShapes([...shapesById.values()]);
+      setMessages((current) => (
+        [...new Map([...state.messages, ...current].map((message) => [message.id, message])).values()].slice(-100)
+      ));
+      setPresence(state.presence);
+      const presentIds = new Set(state.presence.map((member) => member.userId));
+      setRemoteCursors(
+        Object.fromEntries(
+          Object.entries(useCanvasStore.getState().remoteCursors)
+            .filter(([userId]) => presentIds.has(userId)),
+        ),
+      );
+    };
+    const handlePresence = (update: { roomId: string; users: RoomUser[] }) => {
+      if (update.roomId !== roomId) return;
+      setPresence(update.users);
+      const presentIds = new Set(update.users.map((member) => member.userId));
+      setRemoteCursors(
+        Object.fromEntries(
+          Object.entries(useCanvasStore.getState().remoteCursors)
+            .filter(([userId]) => presentIds.has(userId)),
+        ),
+      );
+    };
+    const handleDraw = (event: { roomId: string; shape: Shape }) => {
+      if (event.roomId === roomId) addShape(event.shape);
+    };
+    const handleCursorMove = (event: { roomId: string; cursor: Cursor }) => {
+      if (event.roomId === roomId) updateRemoteCursor(event.cursor);
+    };
+    const handleMessage = (event: { roomId: string; message: ChatMessage }) => {
+      if (event.roomId !== roomId) return;
+      const message = event.message;
+      setMessages((current) => (
+        current.some((item) => item.id === message.id)
+          ? current
+          : [...current, message].slice(-100)
+      ));
+    };
+    const handleActionError = (message: string) => setError(message);
+    const handleRoomNotFound = () => setError('This room no longer exists. Refresh the room list and choose another.');
 
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
-    socket.on("draw", handleDraw);
-    socket.on("cursor_move", handleCursorMove);
-    if (socket.connected) handleConnect();
+    socket.on('connect', joinRoom);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('room_state', handleRoomState);
+    socket.on('presence_update', handlePresence);
+    socket.on('draw', handleDraw);
+    socket.on('cursor_move', handleCursorMove);
+    socket.on('chat_message', handleMessage);
+    socket.on('action_error', handleActionError);
+    socket.on('room_not_found', handleRoomNotFound);
+    if (!socket.connected) socket.connect();
+    else joinRoom();
 
     return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("draw", handleDraw);
-      socket.off("cursor_move", handleCursorMove);
-      if (socket.connected) socket.emit("leave_room", roomId);
+      socket.emit('leave_room', roomId);
+      socket.off('connect', joinRoom);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('room_state', handleRoomState);
+      socket.off('presence_update', handlePresence);
+      socket.off('draw', handleDraw);
+      socket.off('cursor_move', handleCursorMove);
+      socket.off('chat_message', handleMessage);
+      socket.off('action_error', handleActionError);
+      socket.off('room_not_found', handleRoomNotFound);
+      setPresence([]);
+      setRemoteCursors({});
     };
-  }, [roomId, addShape, updateRemoteCursor]);
+  }, [roomId, user.id, user.name, user.color, addShape, setShapes, updateRemoteCursor, setRemoteCursors]);
 
-  const sendDraw = (shape: Shape) => {
-    if (socket.connected && roomId) {
-      socket.emit("draw", { roomId, shape });
+  const sendDraw = useCallback((shape: Shape) => {
+    if (!socket.connected) {
+      setError('Connection lost. Your drawing was not sent.');
+      return;
     }
-  };
+    setError('');
+    socket.emit('draw', shape);
+  }, []);
 
-  const sendCursor = (x: number, y: number, userId: string) => {
-    if (socket.connected && roomId) {
-      socket.emit("cursor_move", {
-        roomId,
-        userId,
-        x,
-        y,
-        color: useCanvasStore.getState().currentColor,
-      });
+  const sendCursor = useCallback((x: number, y: number) => {
+    if (socket.connected) socket.emit('cursor_move', { x, y });
+  }, []);
+
+  const sendMessage = useCallback((body: string) => {
+    if (!socket.connected) {
+      setError('Connection lost. Your message was not sent.');
+      return;
     }
-  };
+    setError('');
+    socket.emit('chat_message', body);
+  }, []);
 
-  return { isConnected, sendDraw, sendCursor };
+  return {
+    isConnected,
+    presence,
+    messages,
+    error,
+    clearError: () => setError(''),
+    sendDraw,
+    sendCursor,
+    sendMessage,
+  };
 };

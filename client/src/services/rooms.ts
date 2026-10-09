@@ -4,22 +4,26 @@ export interface Room {
   id: string;
   name: string;
   ownerId: string;
+  createdAt: string;
 }
 
 const API_BASE_URL = `${API_URL}/api`;
 
 export const fetchRooms = async (): Promise<Room[]> => {
   const response = await fetch(`${API_BASE_URL}/rooms`);
-  if (!response.ok) throw new Error('Failed to fetch rooms');
+  if (!response.ok) throw new Error('Could not load rooms. Please try again.');
   return response.json();
 };
 
-export const createRoom = async (name: string): Promise<Room> => {
+export const createRoom = async ({ name, ownerId }: { name: string; ownerId: string }): Promise<Room> => {
   const response = await fetch(`${API_BASE_URL}/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, ownerId: 'user-123' }), // Mock ownerId
+    body: JSON.stringify({ name, ownerId }),
   });
-  if (!response.ok) throw new Error('Failed to create room');
+  if (!response.ok) {
+    const result = await response.json().catch(() => null);
+    throw new Error(result?.error || 'Could not create room. Please try again.');
+  }
   return response.json();
 };

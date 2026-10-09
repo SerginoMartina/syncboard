@@ -1,7 +1,7 @@
 # SyncBoard 🎨
-**A production-grade, real-time collaborative whiteboard built for high concurrency.**
+**A real-time collaborative whiteboard for sharing ideas with your team.**
 
-SyncBoard is a high-performance collaborative workspace where multiple users can draw, create shapes, and interact in real-time. It was built to solve the "hard" problems of frontend engineering: real-time synchronization, high-frequency state updates, and horizontal scalability.
+SyncBoard is a collaborative workspace where multiple users can draw, create shapes, and chat in real time. Room content is stored in PostgreSQL and restored when collaborators return.
 
 ---
 
@@ -10,17 +10,17 @@ SyncBoard is a high-performance collaborative workspace where multiple users can
 ### 1. High-Performance Rendering Engine
 Instead of using standard DOM elements (like SVG) which degrade with high object counts, SyncBoard uses an **HTML5 Canvas** with a dedicated `requestAnimationFrame` rendering loop. This ensures 60fps performance even with hundreds of objects on the board.
 
-### 2. Scalable Real-time Architecture
+### 2. Real-time Collaboration
 - **WebSockets (Socket.io):** Handles the low-latency bidirectional communication.
-- **Redis Pub/Sub:** Implemented to ensure horizontal scalability. By using a Redis message bus, the application can be deployed across multiple server instances while maintaining consistent state across all users.
+- **PostgreSQL:** Persists rooms, board shapes, and chat history. Live cursor and room presence updates are sent over Socket.IO.
 
 ### 3. Intelligent State Management
 - **Zustand:** Used for high-frequency "Client State" (drawing coordinates, active tools) because it offers minimal overhead and excellent performance for rapid updates.
-- **TanStack Query:** Used for "Server State" (room metadata, user lists). It handles caching, loading states, and—most importantly—**Optimistic Updates**, making the UI feel instantaneous even with network latency.
+- **TanStack Query:** Used for room data, loading states, and refreshing the workspace list after a room is created.
 
 ### 4. Concurrency & Presence
 - **Remote Cursors:** Real-time presence of other users' mouse positions to improve collaboration UX.
-- **Room Isolation:** Users are segmented into private rooms using Socket.io rooms, ensuring data privacy and reducing unnecessary broadcast traffic.
+- **Room Isolation:** Drawings and chat are sent only to collaborators connected to the selected Socket.IO room.
 
 ---
 
@@ -37,14 +37,39 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 **Backend:**
 - Node.js & Express
 - Socket.io
-- Redis (Pub/Sub & Scaling)
+- PostgreSQL (rooms, canvas shapes, and chat history)
 - Docker (Containerization)
 
 ---
 
+## PostgreSQL schema
+
+SyncBoard's PostgreSQL objects live in the dedicated `syncboard` schema, so
+they do not share the default `public` namespace with other applications using
+the same database. The schema contains rooms, canvas shapes, and chat messages;
+deleting a room also deletes its shapes and messages. The server applies the
+DDL as a database initialization step when using Docker Compose. When deploying
+against an existing database, apply the migration with a role that can create
+schemas and tables:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/database/schema.sql
+```
+
+For production, use a dedicated SyncBoard runtime role and grant it access only
+to this schema and its tables, rather than every application's objects. Run
+the schema migration separately with a deployment role; the runtime role only
+needs these data permissions:
+
+```sql
+GRANT USAGE ON SCHEMA syncboard TO syncboard_app;
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON ALL TABLES IN SCHEMA syncboard TO syncboard_app;
+```
+
 ## 🏗 Architecture Diagram
 
-`User A` & `User B` ↔ `Socket.io` ↔ `Node.js Server` ↔ `Redis Pub/Sub` ↔ `Node.js Server` ↔ `User C`
+`Collaborators` ↔ `Socket.io` ↔ `Node.js Server` ↔ `PostgreSQL`
 
 ---
 
@@ -61,10 +86,14 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
    cd syncboard
    ```
 
-2. **Start the Infrastructure (Redis & Server):**
+2. **Start the Database and Server:**
    ```bash
    docker-compose up -d
    ```
+
+   The API and PostgreSQL are available at `http://localhost:3000` and
+   `localhost:5432`. The schema is installed when the PostgreSQL volume is
+   initialized for the first time.
 
 3. **Install Frontend Dependencies:**
    ```bash
@@ -72,10 +101,9 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
    npm install
    ```
 
-4. **Run the Development Server:**
+4. **Run the Frontend Development Server:**
    ```bash
-   # From the project root
-   npm run dev # (Assuming script is set in root or client)
+   npm run dev
    ```
 
 ### Production frontend configuration
@@ -88,6 +116,6 @@ to `http://localhost:3000`.
 ---
 
 ## 🧪 Performance Optimizations
-- **Throttled Socket Emissions:** Mouse movements are batched and sent at 60fps to prevent network saturation.
-- **Optimistic UI:** Room creation and joins happen immediately on the frontend, rolling back only if the server returns an error.
-- **Memory Management:** Proper cleanup of socket listeners and subscription handles to prevent memory leaks in the browser.
+- **Persistent collaboration:** Room boards and chat history are stored in PostgreSQL and restored when collaborators join.
+- **Live presence:** Active collaborators and cursor movement are shared over Socket.IO.
+- **Room isolation:** Board drawings and chat messages are scoped to their room.

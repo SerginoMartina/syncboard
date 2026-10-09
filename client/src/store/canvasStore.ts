@@ -25,7 +25,9 @@ export interface CanvasState {
   setTool: (tool: 'line' | 'rect' | 'freehand') => void;
   set_color: (color: string) => void;
   addShape: (shape: Shape) => void;
+  setShapes: (shapes: Shape[]) => void;
   updateRemoteCursor: (cursor: Cursor) => void;
+  setRemoteCursors: (cursors: Record<string, Cursor>) => void;
   clearCanvas: () => void;
 }
 
@@ -39,13 +41,17 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   setTool: (tool) => set({ currentTool: tool }),
   set_color: (color) => set({ currentColor: color }),
   
-  addShape: (shape) => set((state) => ({ 
-    shapes: [...state.shapes, shape] 
+  addShape: (shape) => set((state) => ({
+    shapes: state.shapes.some((existing) => existing.id === shape.id)
+      ? state.shapes
+      : [...state.shapes, shape],
   })),
+  setShapes: (shapes) => set({ shapes }),
 
   updateRemoteCursor: (cursor) => set((state) => ({
     remoteCursors: { ...state.remoteCursors, [cursor.userId]: cursor }
   })),
+  setRemoteCursors: (remoteCursors) => set({ remoteCursors }),
 
-  clearCanvas: () => set({ shapes: [] }),
+  clearCanvas: () => set({ shapes: [], remoteCursors: {} }),
 }));
