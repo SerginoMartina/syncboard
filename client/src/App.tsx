@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUp, ArrowUpRight, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Square, Trash2, Type, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Square, Trash2, Type, X } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
-import { useSocket, type ChatMessage, type GuestUser, type RoomUser } from './hooks/useSocket';
+import { useSocket, type ChatMessage, type ChatPoll, type GuestUser, type RoomUser } from './hooks/useSocket';
 import type { Room } from './services/rooms';
 import { useCanvasStore } from './store/canvasStore';
 
@@ -48,6 +48,9 @@ function RoomWorkspace({
 }) {
   const [messageDraft, setMessageDraft] = useState('');
   const [chatOpen, setChatOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
+  const [pollComposerOpen, setPollComposerOpen] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const currentTool = useCanvasStore((state) => state.currentTool);
   const setTool = useCanvasStore((state) => state.setTool);
@@ -57,12 +60,15 @@ function RoomWorkspace({
     isConnected,
     presence,
     messages,
+    polls,
     error,
     roomDeleted,
     clearError,
     sendDraw,
     sendCursor,
     sendMessage,
+    createPoll,
+    votePoll,
   } = useSocket(room.id, user);
 
   useEffect(() => {
@@ -79,6 +85,17 @@ function RoomWorkspace({
     if (!body) return;
     sendMessage(body);
     setMessageDraft('');
+  };
+
+  const handleCreatePoll = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const question = pollQuestion.trim();
+    const options = pollOptions.map((option) => option.trim()).filter(Boolean);
+    if (!question || options.length < 2) return;
+    createPoll(question, options);
+    setPollQuestion('');
+    setPollOptions(['', '']);
+    setPollComposerOpen(false);
   };
 
   return (
@@ -168,8 +185,79 @@ function RoomWorkspace({
               <X size={16} />
             </button>
           </div>
+          {pollComposerOpen && (
+            <form className="poll-composer" onSubmit={handleCreatePoll}>
+              <label htmlFor="poll-question">Ask a question</label>
+              <input
+                id="poll-question"
+                value={pollQuestion}
+                onChange={(event) => setPollQuestion(event.target.value)}
+                placeholder="What should we decide?"
+                maxLength={200}
+                required
+              />
+              {pollOptions.map((option, index) => (
+                <input
+                  key={index}
+                  value={option}
+                  onChange={(event) => setPollOptions((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))}
+                  placeholder={`Option ${index + 1}`}
+                  maxLength={100}
+                  required={index < 2}
+                  aria-label={`Poll option ${index + 1}`}
+                />
+              ))}
+              <div className="poll-composer-actions">
+                {pollOptions.length < 6 && (
+                  <button type="button" className="poll-add-option" onClick={() => setPollOptions((current) => [...current, ''])}>
+                    <Plus size={13} /> Add option
+                  </button>
+                )}
+                <button type="button" className="poll-cancel-button" onClick={() => setPollComposerOpen(false)}>Cancel</button>
+                <button type="submit" className="poll-submit-button" disabled={!pollQuestion.trim() || pollOptions.filter((option) => option.trim()).length < 2}>
+                  Create poll
+                </button>
+              </div>
+            </form>
+          )}
           <div className="chat-messages" aria-live="polite">
-            {messages.length === 0 ? (
+            {polls.length > 0 && (
+              <div className="chat-polls" aria-label="Room polls">
+                {polls.map((poll: ChatPoll) => {
+                  const totalVotes = poll.options.reduce((total, option) => total + option.votes, 0);
+                  return (
+                    <article className="poll-card" key={poll.id}>
+                      <div className="poll-card-heading">
+                        <strong>{poll.question}</strong>
+                        <span>{totalVotes} {totalVotes === 1 ? 'vote' : 'votes'}</span>
+                      </div>
+                      <div className="poll-options">
+                        {poll.options.map((option) => {
+                          const percent = totalVotes ? Math.round((option.votes / totalVotes) * 100) : 0;
+                          const selected = poll.selectedOptionId === option.id;
+                          return (
+                            <button
+                              className={`poll-option ${selected ? 'poll-option-selected' : ''}`}
+                              key={option.id}
+                              type="button"
+                              onClick={() => votePoll(poll.id, option.id)}
+                              aria-pressed={selected}
+                              title={selected ? 'Your vote — click another option to change it' : 'Vote for this option'}
+                            >
+                              <span className="poll-option-progress" style={{ width: `${percent}%` }} />
+                              <span className="poll-option-label">{option.text}</span>
+                              <span className="poll-option-percent">{percent}%</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="poll-creator">Poll by {poll.creatorName}{poll.selectedOptionId ? ' · Your vote is in' : ''}</span>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            {messages.length === 0 && polls.length === 0 ? (
               <div className="chat-empty">
                 <span className="chat-empty-icon"><MessageCircle size={19} /></span>
                 <strong>Start the conversation</strong>
@@ -208,6 +296,14 @@ function RoomWorkspace({
             />
             <button type="submit" disabled={!messageDraft.trim()} aria-label="Send message">
               <ArrowUp size={17} />
+            </button>
+            <button
+              type="button"
+              className="poll-compose-trigger"
+              onClick={() => setPollComposerOpen((open) => !open)}
+              aria-expanded={pollComposerOpen}
+            >
+              <BarChart3 size={14} /> Poll
             </button>
             <span>Enter to send · Shift + Enter for a new line</span>
           </form>

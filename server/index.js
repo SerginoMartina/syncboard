@@ -44,6 +44,32 @@ const publishPresence = (roomId) => {
   });
 };
 
+const pollsForRoom = async (roomId, userId) => {
+  const { rows } = await pool.query(
+    `SELECT p.id, p.question, p.user_id AS "creatorId",
+            p.user_name AS "creatorName", p.created_at AS "createdAt",
+            jsonb_agg(
+              jsonb_build_object('id', o.id, 'text', o.label, 'votes', COALESCE(v.vote_count, 0))
+              ORDER BY o.position
+            ) AS options,
+            MAX(own_vote.option_id) AS "selectedOptionId"
+     FROM syncboard.chat_polls p
+     JOIN syncboard.chat_poll_options o ON o.poll_id = p.id
+     LEFT JOIN (
+       SELECT option_id, count(*)::integer AS vote_count
+       FROM syncboard.chat_poll_votes
+       GROUP BY option_id
+     ) v ON v.option_id = o.id
+     LEFT JOIN syncboard.chat_poll_votes own_vote
+       ON own_vote.poll_id = p.id AND own_vote.user_id = $2
+     WHERE p.room_id = $1
+     GROUP BY p.id
+     ORDER BY p.created_at, p.id`,
+    [roomId, userId],
+  );
+  return rows;
+};
+
 io.on('connection', (socket) => {
   socket.on('join_room', async (request) => {
     const joinAttempt = (socket.data.joinAttempt || 0) + 1;
@@ -84,7 +110,7 @@ io.on('connection', (socket) => {
         color: user.color,
       });
 
-      const [shapeResult, messageResult] = await Promise.all([
+      const [shapeResult, messageResult, polls] = await Promise.all([
         pool.query(
           `SELECT id, type, points, color, width, text_content AS text,
                   created_at AS "createdAt"
@@ -102,6 +128,7 @@ io.on('connection', (socket) => {
            LIMIT 100`,
           [roomId],
         ),
+        pollsForRoom(roomId, user.id),
       ]);
 
       if (socket.data.joinAttempt !== joinAttempt) return;
@@ -109,6 +136,7 @@ io.on('connection', (socket) => {
         roomId,
         shapes: shapeResult.rows,
         messages: messageResult.rows.reverse(),
+        polls,
         presence: presenceForRoom(roomId),
       });
       publishPresence(roomId);
@@ -186,6 +214,111 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Failed to save chat message:', error);
       socket.emit('action_error', 'Could not send your message.');
+    }
+  });
+
+  socket.on('create_poll', async (request) => {
+    const roomId = socket.data.roomId;
+    const user = activeUsers.get(socket.id);
+    const question = typeof request?.question === 'string' ? request.question.trim() : '';
+    const options = Array.isArray(request?.options)
+      ? request.options.map((option) => typeof option === 'string' ? option.trim() : '')
+      : [];
+    if (!roomId || !user || !question || question.length > 200 ||
+        options.length < 2 || options.length > 6 ||
+        options.some((option) => !option || option.length > 100) ||
+        new Set(options.map((option) => option.toLowerCase())).size !== options.length) {
+      socket.emit('action_error', 'A poll needs a question and 2–6 unique options.');
+      return;
+    }
+
+    let client;
+    let transactionOpen = false;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      transactionOpen = true;
+      const pollId = randomUUID();
+      await client.query(
+        `INSERT INTO syncboard.chat_polls (id, room_id, user_id, user_name, question)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [pollId, roomId, user.userId, user.name, question],
+      );
+      for (const [position, label] of options.entries()) {
+        await client.query(
+          `INSERT INTO syncboard.chat_poll_options (id, poll_id, label, position)
+           VALUES ($1, $2, $3, $4)`,
+          [randomUUID(), pollId, label, position],
+        );
+      }
+      await client.query('COMMIT');
+      transactionOpen = false;
+      const [poll] = await pollsForRoom(roomId, user.userId)
+        .then((roomPolls) => roomPolls.filter((item) => item.id === pollId));
+      io.to(roomId).emit('chat_poll_created', { roomId, poll });
+    } catch (error) {
+      if (client && transactionOpen) await client.query('ROLLBACK');
+      console.error('Failed to create chat poll:', error);
+      socket.emit('action_error', 'Could not create the poll. Please try again.');
+    } finally {
+      client?.release();
+    }
+  });
+
+  socket.on('vote_poll', async (request) => {
+    const roomId = socket.data.roomId;
+    const user = activeUsers.get(socket.id);
+    const pollId = typeof request?.pollId === 'string' ? request.pollId : '';
+    const optionId = typeof request?.optionId === 'string' ? request.optionId : '';
+    if (!roomId || !user || !pollId || !optionId) {
+      socket.emit('action_error', 'Could not submit that poll vote.');
+      return;
+    }
+
+    let client;
+    let transactionOpen = false;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      transactionOpen = true;
+      const option = await client.query(
+        `SELECT 1
+         FROM syncboard.chat_poll_options o
+         JOIN syncboard.chat_polls p ON p.id = o.poll_id
+         WHERE p.id = $1 AND p.room_id = $2 AND o.id = $3`,
+        [pollId, roomId, optionId],
+      );
+      if (!option.rowCount) {
+        await client.query('ROLLBACK');
+        transactionOpen = false;
+        client.release();
+        client = null;
+        socket.emit('action_error', 'That poll option is no longer available.');
+        return;
+      }
+      await client.query(
+        `INSERT INTO syncboard.chat_poll_votes (poll_id, option_id, user_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (poll_id, user_id)
+         DO UPDATE SET option_id = EXCLUDED.option_id, created_at = now()`,
+        [pollId, optionId, user.userId],
+      );
+      await client.query('COMMIT');
+      transactionOpen = false;
+      const [poll] = await pollsForRoom(roomId, user.userId)
+        .then((roomPolls) => roomPolls.filter((item) => item.id === pollId));
+      io.to(roomId).emit('chat_poll_updated', {
+        roomId,
+        poll,
+        voterId: user.userId,
+        selectedOptionId: optionId,
+      });
+    } catch (error) {
+      if (client && transactionOpen) await client.query('ROLLBACK');
+      console.error('Failed to submit poll vote:', error);
+      socket.emit('action_error', 'Could not submit your vote. Please try again.');
+    } finally {
+      client?.release();
     }
   });
 

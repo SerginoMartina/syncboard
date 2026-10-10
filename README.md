@@ -1,7 +1,7 @@
 # SyncBoard 🎨
 **A real-time collaborative whiteboard for sharing ideas with your team.**
 
-SyncBoard is a collaborative workspace where multiple users can draw freehand, use lines, arrows, rectangles, ellipses, and a highlighter, add text, and chat in real time. Room content is stored in PostgreSQL and restored when collaborators return. The room header shows which collaborators are online.
+SyncBoard is a collaborative workspace where multiple users can draw freehand, use lines, arrows, rectangles, ellipses, and a highlighter, add text, create chat polls, and chat in real time. Room content is stored in PostgreSQL and restored when collaborators return. The room header shows which collaborators are online.
 
 ---
 
@@ -47,7 +47,8 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 
 SyncBoard's PostgreSQL objects live in the dedicated `syncboard` schema, so
 they do not share the default `public` namespace with other applications using
-the same database. The schema contains rooms, canvas shapes, and chat messages;
+the same database. The schema contains rooms, canvas shapes, chat messages, and polls with options
+and votes;
 deleting a room also deletes its shapes and messages. The server applies the
 idempotent DDL on every startup, including when deployed against an existing
 database. Set `DATABASE_URL` to the PostgreSQL connection URL in the API

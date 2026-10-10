@@ -23,6 +23,16 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type ChatPoll = {
+  id: string;
+  question: string;
+  creatorId: string;
+  creatorName: string;
+  createdAt: string;
+  options: { id: string; text: string; votes: number }[];
+  selectedOptionId: string | null;
+};
+
 export type GuestUser = {
   id: string;
   name: string;
@@ -35,6 +45,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [presence, setPresence] = useState<RoomUser[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [polls, setPolls] = useState<ChatPoll[]>([]);
   const [error, setError] = useState('');
   const [roomDeleted, setRoomDeleted] = useState(false);
   const addShape = useCanvasStore((state) => state.addShape);
@@ -46,6 +57,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     setShapes([]);
     setPresence([]);
     setMessages([]);
+    setPolls([]);
     setError('');
     setRoomDeleted(false);
 
@@ -58,6 +70,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       roomId: string;
       shapes: Shape[];
       messages: ChatMessage[];
+      polls: ChatPoll[];
       presence: RoomUser[];
     }) => {
       if (state.roomId !== roomId) return;
@@ -67,6 +80,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       setMessages((current) => (
         [...new Map([...state.messages, ...current].map((message) => [message.id, message])).values()].slice(-100)
       ));
+      setPolls(state.polls);
       setPresence(state.presence);
       const presentIds = new Set(state.presence.map((member) => member.userId));
       setRemoteCursors(
@@ -102,6 +116,30 @@ export const useSocket = (roomId: string, user: GuestUser) => {
           : [...current, message].slice(-100)
       ));
     };
+    const handlePollCreated = (event: { roomId: string; poll: ChatPoll }) => {
+      if (event.roomId !== roomId) return;
+      setPolls((current) => (
+        current.some((poll) => poll.id === event.poll.id) ? current : [...current, event.poll]
+      ));
+    };
+    const handlePollUpdated = (event: {
+      roomId: string;
+      poll: ChatPoll;
+      voterId: string;
+      selectedOptionId: string;
+    }) => {
+      if (event.roomId !== roomId) return;
+      setPolls((current) => current.map((poll) => (
+        poll.id === event.poll.id
+          ? {
+            ...event.poll,
+            selectedOptionId: event.voterId === user.id
+              ? event.selectedOptionId
+              : poll.selectedOptionId,
+          }
+          : poll
+      )));
+    };
     const handleActionError = (message: string) => setError(message);
     const handleRoomNotFound = () => setError('This room no longer exists. Refresh the room list and choose another.');
     const handleRoomDeleted = (deletedRoomId: string) => {
@@ -115,6 +153,8 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     socket.on('draw', handleDraw);
     socket.on('cursor_move', handleCursorMove);
     socket.on('chat_message', handleMessage);
+    socket.on('chat_poll_created', handlePollCreated);
+    socket.on('chat_poll_updated', handlePollUpdated);
     socket.on('action_error', handleActionError);
     socket.on('room_not_found', handleRoomNotFound);
     socket.on('room_deleted', handleRoomDeleted);
@@ -130,6 +170,8 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       socket.off('draw', handleDraw);
       socket.off('cursor_move', handleCursorMove);
       socket.off('chat_message', handleMessage);
+      socket.off('chat_poll_created', handlePollCreated);
+      socket.off('chat_poll_updated', handlePollUpdated);
       socket.off('action_error', handleActionError);
       socket.off('room_not_found', handleRoomNotFound);
       socket.off('room_deleted', handleRoomDeleted);
@@ -164,11 +206,28 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     isConnected,
     presence,
     messages,
+    polls,
     error,
     roomDeleted,
     clearError: () => setError(''),
     sendDraw,
     sendCursor,
     sendMessage,
+    createPoll: (question: string, options: string[]) => {
+      if (!socket.connected) {
+        setError('Connection lost. Your poll was not created.');
+        return;
+      }
+      setError('');
+      socket.emit('create_poll', { question, options });
+    },
+    votePoll: (pollId: string, optionId: string) => {
+      if (!socket.connected) {
+        setError('Connection lost. Your vote was not sent.');
+        return;
+      }
+      setError('');
+      socket.emit('vote_poll', { pollId, optionId });
+    },
   };
 };

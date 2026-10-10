@@ -75,3 +75,37 @@ CREATE TABLE IF NOT EXISTS syncboard.chat_messages (
 
 CREATE INDEX IF NOT EXISTS chat_messages_room_created_at_idx
     ON syncboard.chat_messages (room_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS syncboard.chat_polls (
+    id text PRIMARY KEY,
+    room_id text NOT NULL REFERENCES syncboard.rooms (id) ON DELETE CASCADE,
+    user_id text NOT NULL,
+    user_name text NOT NULL CHECK (length(btrim(user_name)) > 0),
+    question text NOT NULL CHECK (length(btrim(question)) > 0 AND length(question) <= 200),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS chat_polls_room_created_at_idx
+    ON syncboard.chat_polls (room_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS syncboard.chat_poll_options (
+    id text NOT NULL,
+    poll_id text NOT NULL REFERENCES syncboard.chat_polls (id) ON DELETE CASCADE,
+    label text NOT NULL CHECK (length(btrim(label)) > 0 AND length(label) <= 100),
+    position smallint NOT NULL CHECK (position >= 0),
+    PRIMARY KEY (poll_id, id),
+    UNIQUE (poll_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS syncboard.chat_poll_votes (
+    poll_id text NOT NULL,
+    option_id text NOT NULL,
+    user_id text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (poll_id, user_id),
+    FOREIGN KEY (poll_id, option_id)
+        REFERENCES syncboard.chat_poll_options (poll_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS chat_poll_votes_option_idx
+    ON syncboard.chat_poll_votes (option_id);

@@ -134,13 +134,39 @@ button:disabled { cursor: not-allowed; }
 .message-meta time { flex: 0 0 auto; color: #b0b1bc; font-size: 8px; }
 .message-content p { margin: 0; color: #666879; font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
 .message-own .message-content p { color: #424459; }
-.chat-composer { position: relative; display: grid; grid-template-columns: 1fr 31px; gap: 7px; padding: 11px; border-top: 1px solid #eeeef3; }
+.chat-composer { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto 31px; gap: 7px; padding: 11px; border-top: 1px solid #eeeef3; }
 .chat-composer textarea { grid-column: 1 / -1; width: 100%; min-height: 58px; resize: vertical; padding: 9px; color: #45475a; background: #fafafd; border: 1px solid #e8e8ef; border-radius: 8px; outline: 0; font-size: 10px; line-height: 1.5; }
 .chat-composer textarea:focus { border-color: #e1a4a5; box-shadow: 0 0 0 3px #d9515914; }
 .chat-composer textarea::placeholder { color: #b1b2bf; }
-.chat-composer button { display: grid; grid-column: 2; grid-row: 2; width: 31px; height: 29px; place-items: center; color: white; background: #d95159; border: 0; border-radius: 7px; }
-.chat-composer button:disabled { color: #aaa9bc; background: #f0f0f5; }
-.chat-composer > span { align-self: center; grid-column: 1; grid-row: 2; color: #a8a9b5; font-size: 8px; }
+.chat-composer > button[type="submit"] { display: grid; grid-column: 3; grid-row: 2; width: 31px; height: 29px; place-items: center; color: white; background: #d95159; border: 0; border-radius: 7px; }
+.chat-composer > button[type="submit"]:disabled { color: #aaa9bc; background: #f0f0f5; }
+.chat-composer > span { align-self: center; grid-column: 1; grid-row: 2; color: #a8a9b5; font-size: 8px; white-space: nowrap; }
+.poll-compose-trigger { display: inline-flex; grid-column: 2; grid-row: 2; align-items: center; justify-content: center; gap: 4px; height: 29px; padding: 0 7px; color: #bd444c; background: #fff5f3; border: 1px solid #f1dedd; border-radius: 7px; font-size: 9px; }
+.poll-compose-trigger:hover, .poll-compose-trigger[aria-expanded="true"] { background: #ffebe8; }
+.poll-composer { display: flex; flex-direction: column; gap: 7px; padding: 11px; background: #fffaf9; border-bottom: 1px solid #eeeef3; }
+.poll-composer label { color: #54566a; font-size: 10px; font-weight: 700; }
+.poll-composer input { width: 100%; min-width: 0; padding: 7px 8px; color: #45475a; background: #fff; border: 1px solid #e8e8ef; border-radius: 7px; outline: 0; font-size: 10px; }
+.poll-composer input:focus { border-color: #e1a4a5; box-shadow: 0 0 0 2px #d9515914; }
+.poll-composer-actions { display: flex; align-items: center; gap: 7px; padding-top: 2px; }
+.poll-composer-actions button { min-height: 27px; padding: 0 8px; border: 0; border-radius: 6px; font-size: 9px; }
+.poll-add-option { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; color: #bd444c; background: #fff0ee; }
+.poll-cancel-button { color: #747688; background: #f3f3f7; }
+.poll-submit-button { color: #fff; background: #d95159; }
+.poll-submit-button:disabled { opacity: .5; }
+.chat-polls { display: flex; flex-direction: column; gap: 10px; }
+.poll-card { padding: 11px; background: #fffaf9; border: 1px solid #f0e2e0; border-radius: 9px; }
+.poll-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.poll-card-heading strong { color: #45475a; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.poll-card-heading > span { flex: 0 0 auto; color: #a0a1ae; font-size: 8px; }
+.poll-options { display: flex; flex-direction: column; gap: 5px; }
+.poll-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 31px; overflow: hidden; padding: 0 8px; color: #666879; background: #fff; border: 1px solid #eae8ec; border-radius: 6px; text-align: left; }
+.poll-option:hover { border-color: #e3b4b3; }
+.poll-option-selected { color: #a83e47; border-color: #e4a9a8; }
+.poll-option-progress { position: absolute; inset: 0 auto 0 0; background: #fce9e6; pointer-events: none; }
+.poll-option-label, .poll-option-percent { position: relative; z-index: 1; font-size: 9px; }
+.poll-option-percent { color: #858696; }
+.poll-option-selected .poll-option-label { font-weight: 700; }
+.poll-creator { display: block; margin-top: 7px; color: #a0a1ae; font-size: 8px; }
 .welcome-panel { display: grid; flex: 1; min-height: 450px; place-items: center; padding: 35px; }
 .welcome-content { width: min(100%, 490px); text-align: center; }
 .welcome-art { position: relative; display: grid; width: 130px; height: 112px; place-items: center; margin: 0 auto 23px; }
@@ -194,6 +220,7 @@ button:disabled { cursor: not-allowed; }
   .chat-panel { right: 8px; bottom: 8px; width: auto; max-width: none; height: min(68%, 530px); }
   .chat-launcher { right: 10px; bottom: 10px; }
   .chat-messages { min-height: 0; }
+  .chat-composer > span { display: none; }
   .chat-empty { min-height: 0; }
   .toolbar-hint { display: none; }
   .online-indicator { display: none; }
