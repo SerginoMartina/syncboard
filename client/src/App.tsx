@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Sparkles, Square, Trash2, Type, Users, X } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
 import { useSocket, type ChatMessage, type ChatPoll, type GuestUser, type RoomUser } from './hooks/useSocket';
 import { askLocalAssistant } from './services/assistant';
 import type { ProposedDrawing } from './services/assistant';
+import { fetchProfile, ProfileSaveError, saveProfile } from './services/profiles';
 import type { Room } from './services/rooms';
 import { useCanvasStore, type Shape } from './store/canvasStore';
 
@@ -17,12 +18,18 @@ const makeGuest = (): GuestUser => {
     id,
     name: localStorage.getItem('syncboard-user-name') || '',
     color: localStorage.getItem('syncboard-user-color') || palette[colorIndex],
+    avatarUrl: null,
   };
 };
 
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
 
-function Avatar({ name, color, size = 'normal' }: { name: string; color: string; size?: 'normal' | 'small' }) {
+function Avatar({ name, color, avatarUrl, size = 'normal' }: {
+  name: string;
+  color: string;
+  avatarUrl?: string | null;
+  size?: 'normal' | 'small';
+}) {
   return (
     <span
       className={`avatar avatar-${size}`}
@@ -30,16 +37,37 @@ function Avatar({ name, color, size = 'normal' }: { name: string; color: string;
       title={name}
       aria-label={name}
     >
-      {initials(name)}
+      {avatarUrl ? <img className="avatar-image" src={avatarUrl} alt="" /> : initials(name)}
     </span>
   );
 }
+
+const readProfileImage = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    reject(new Error('Choose a PNG, JPEG, or WebP image.'));
+    return;
+  }
+  if (file.size > 512 * 1024) {
+    reject(new Error('Choose an image smaller than 512 KB.'));
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === 'string') resolve(reader.result);
+    else reject(new Error('Could not read that image.'));
+  };
+  reader.onerror = () => reject(new Error('Could not read that image.'));
+  reader.readAsDataURL(file);
+});
 
 function WelcomeFlow({
   step,
   displayName,
   onDisplayNameChange,
   onStart,
+  nameError,
+  suggestedName,
+  onChooseSuggestedName,
   onBack,
   onNext,
 }: {
@@ -47,6 +75,9 @@ function WelcomeFlow({
   displayName: string;
   onDisplayNameChange: (name: string) => void;
   onStart: (event: FormEvent<HTMLFormElement>) => void;
+  nameError: string;
+  suggestedName: string | null;
+  onChooseSuggestedName: () => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -98,6 +129,16 @@ function WelcomeFlow({
               maxLength={32}
               required
             />
+            {nameError && (
+              <div className="profile-name-error" role="alert">
+                <span>{nameError}</span>
+                {suggestedName && (
+                  <button type="button" onClick={onChooseSuggestedName}>
+                    Use “{suggestedName}”
+                  </button>
+                )}
+              </div>
+            )}
             <button className="welcome-primary-button" type="submit" disabled={!displayName.trim()}>
               Continue <ArrowUpRight size={16} />
             </button>
@@ -137,6 +178,8 @@ function RoomWorkspace({
   onToggleExpanded: () => void;
 }) {
   const [messageDraft, setMessageDraft] = useState('');
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editedMessageDraft, setEditedMessageDraft] = useState('');
   const [chatOpen, setChatOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const [pollComposerOpen, setPollComposerOpen] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
@@ -168,6 +211,8 @@ function RoomWorkspace({
     sendDraw,
     sendCursor,
     sendMessage,
+    editMessage,
+    deleteMessage,
     createPoll,
     votePoll,
   } = useSocket(room.id, user);
@@ -208,6 +253,24 @@ function RoomWorkspace({
     }
     sendMessage(body);
     setMessageDraft('');
+  };
+
+  const handleEditMessage = async (event: FormEvent<HTMLFormElement>, messageId: string) => {
+    event.preventDefault();
+    const body = editedMessageDraft.trim();
+    if (!body) return;
+    if (await editMessage(messageId, body)) {
+      setEditingMessageId(null);
+      setEditedMessageDraft('');
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!window.confirm('Remove this message from the room chat?')) return;
+    if (await deleteMessage(messageId) && editingMessageId === messageId) {
+      setEditingMessageId(null);
+      setEditedMessageDraft('');
+    }
   };
 
   const handleCanvasSizeChange = useCallback((size: { width: number; height: number }) => {
@@ -291,7 +354,7 @@ function RoomWorkspace({
           <div className="avatar-stack" aria-label={`${presence.length} people in this room`}>
             {presence.map((member: RoomUser) => (
               <span className="online-person" key={member.socketId}>
-                <Avatar name={member.name} color={member.color} size="small" />
+                <Avatar name={member.name} color={member.color} avatarUrl={member.avatarUrl} size="small" />
                 <span>{member.name}</span>
               </span>
             ))}
@@ -485,20 +548,60 @@ function RoomWorkspace({
                 <strong>Start the conversation</strong>
                 <span>Messages are saved in this room.</span>
               </div>
-            ) : messages.map((message: ChatMessage) => (
-              <article className={`chat-message ${message.userId === user.id ? 'message-own' : ''}`} key={message.id}>
-                <Avatar name={message.name} color={message.color} size="small" />
-                <div className="message-content">
-                  <div className="message-meta">
-                    <strong>{message.name}</strong>
-                    <time dateTime={message.createdAt}>
-                      {new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                    </time>
+            ) : messages.map((message: ChatMessage) => {
+              const ownMessage = message.userId === user.id;
+              return (
+                <article className={`chat-message ${ownMessage ? 'message-own' : ''}`} key={message.id}>
+                  <Avatar name={message.name} color={message.color} avatarUrl={message.avatarUrl} size="small" />
+                  <div className="message-content">
+                    <div className="message-meta">
+                      <strong>{message.name}</strong>
+                      <time dateTime={message.createdAt}>
+                        {new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                      </time>
+                      {message.editedAt && <span className="message-edited-label">edited</span>}
+                    </div>
+                    {editingMessageId === message.id ? (
+                      <form className="message-edit-form" onSubmit={(event) => void handleEditMessage(event, message.id)}>
+                        <textarea
+                          autoFocus
+                          value={editedMessageDraft}
+                          onChange={(event) => setEditedMessageDraft(event.target.value)}
+                          maxLength={2000}
+                          rows={2}
+                          aria-label="Edit your message"
+                        />
+                        <div>
+                          <button type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
+                          <button type="submit" disabled={!editedMessageDraft.trim()}>Save</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <p>{message.body}</p>
+                        {ownMessage && (
+                          <div className="message-actions">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMessageId(message.id);
+                                setEditedMessageDraft(message.body);
+                              }}
+                              aria-label="Edit message"
+                            ><Pencil size={11} /> Edit</button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteMessage(message.id)}
+                              aria-label="Delete message"
+                            ><Trash2 size={11} /> Delete</button>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
-                  <p>{message.body}</p>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
             <div ref={endOfMessagesRef} />
           </div>
           <form className={`chat-composer ${assistantMode ? 'assistant-mode' : ''}`} onSubmit={(event) => void handleSendMessage(event)}>
@@ -562,6 +665,12 @@ function App() {
   const { data: rooms, isLoading, isError, error, refetch, createRoom, isCreatingRoom, createRoomError, deleteRoom, isDeletingRoom } = useRooms();
   const [user, setUser] = useState<GuestUser>(makeGuest);
   const [nameDraft, setNameDraft] = useState(user.name);
+  const [profileImageDraft, setProfileImageDraft] = useState<string | null | undefined>(undefined);
+  const [profileNameError, setProfileNameError] = useState('');
+  const [profileNameSuggestion, setProfileNameSuggestion] = useState<string | null>(null);
+  const [profileImageError, setProfileImageError] = useState('');
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileLoadError, setProfileLoadError] = useState('');
   const [onboardingStep, setOnboardingStep] = useState(() => {
     if (!user.name) return 0;
     if (
@@ -580,6 +689,60 @@ function App() {
   const activeRoom = rooms?.find((room) => room.id === activeRoomId) ?? null;
 
   useEffect(() => {
+    let isCurrent = true;
+    const hydrateProfile = async () => {
+      try {
+        const savedProfile = await fetchProfile(user.id);
+        if (savedProfile) {
+          if (!isCurrent) return;
+          localStorage.setItem('syncboard-user-name', savedProfile.displayName);
+          localStorage.setItem('syncboard-user-color', savedProfile.color);
+          setUser((current) => ({
+            ...current,
+            name: savedProfile.displayName,
+            color: savedProfile.color,
+            avatarUrl: savedProfile.avatarUrl,
+          }));
+          setNameDraft(savedProfile.displayName);
+          return;
+        }
+
+        if (user.name) {
+          const savedLegacyProfile = await saveProfile({
+            userId: user.id,
+            displayName: user.name,
+            color: user.color,
+          });
+          if (!isCurrent) return;
+          localStorage.setItem('syncboard-user-name', savedLegacyProfile.displayName);
+          localStorage.setItem('syncboard-user-color', savedLegacyProfile.color);
+          setUser((current) => ({
+            ...current,
+            name: savedLegacyProfile.displayName,
+            color: savedLegacyProfile.color,
+            avatarUrl: savedLegacyProfile.avatarUrl,
+          }));
+          setNameDraft(savedLegacyProfile.displayName);
+        }
+      } catch (loadError) {
+        if (!isCurrent) return;
+        if (loadError instanceof ProfileSaveError && loadError.suggestion) {
+          setProfileNameError(loadError.message);
+          setProfileNameSuggestion(loadError.suggestion);
+          setUser((current) => ({ ...current, name: '' }));
+          setOnboardingStep(0);
+        } else {
+          setProfileLoadError(loadError instanceof Error ? loadError.message : 'Could not load your profile.');
+        }
+      } finally {
+        if (isCurrent) setProfileLoading(false);
+      }
+    };
+    void hydrateProfile();
+    return () => { isCurrent = false; };
+  }, [user.id]);
+
+  useEffect(() => {
     if (!boardExpanded) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setBoardExpanded(false);
@@ -588,26 +751,88 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [boardExpanded]);
 
-  const saveName = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = nameDraft.trim().slice(0, 32);
-    if (!name) return;
-    localStorage.setItem('syncboard-user-name', name);
-    setUser((current) => ({ ...current, name }));
-    setNameDraft(name);
-    setProfileDialogOpen(false);
+  const applySavedProfile = (profile: Awaited<ReturnType<typeof saveProfile>>) => {
+    localStorage.setItem('syncboard-user-name', profile.displayName);
+    localStorage.setItem('syncboard-user-color', profile.color);
+    setUser((current) => ({
+      ...current,
+      name: profile.displayName,
+      color: profile.color,
+      avatarUrl: profile.avatarUrl,
+    }));
+    setNameDraft(profile.displayName);
+    setProfileImageDraft(undefined);
+    setProfileNameError('');
+    setProfileNameSuggestion(null);
+    setProfileImageError('');
   };
 
-  const startOnboarding = (event: FormEvent<HTMLFormElement>) => {
+  const handleProfileSaveError = (saveError: unknown) => {
+    if (saveError instanceof ProfileSaveError) {
+      setProfileNameError(saveError.message);
+      setProfileNameSuggestion(saveError.suggestion);
+      return;
+    }
+    setProfileNameError(saveError instanceof Error ? saveError.message : 'Could not save your profile.');
+    setProfileNameSuggestion(null);
+  };
+
+  const saveName = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const name = nameDraft.trim().slice(0, 32);
     if (!name) return;
-    localStorage.setItem('syncboard-user-name', name);
-    setUser((current) => ({ ...current, name }));
-    setNameDraft(name);
-    localStorage.setItem('syncboard-onboarding-started', 'true');
-    localStorage.setItem('syncboard-onboarding-step', '1');
-    setOnboardingStep(1);
+    setProfileNameError('');
+    try {
+      const profile = await saveProfile({
+        userId: user.id,
+        displayName: name,
+        color: user.color,
+        avatarData: profileImageDraft,
+      });
+      applySavedProfile(profile);
+      setProfileDialogOpen(false);
+    } catch (saveError) {
+      handleProfileSaveError(saveError);
+    }
+  };
+
+  const startOnboarding = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = nameDraft.trim().slice(0, 32);
+    if (!name) return;
+    setProfileNameError('');
+    try {
+      const profile = await saveProfile({
+        userId: user.id,
+        displayName: name,
+        color: user.color,
+      });
+      applySavedProfile(profile);
+      localStorage.setItem('syncboard-onboarding-started', 'true');
+      localStorage.setItem('syncboard-onboarding-step', '1');
+      setOnboardingStep(1);
+    } catch (saveError) {
+      handleProfileSaveError(saveError);
+    }
+  };
+
+  const chooseSuggestedName = () => {
+    if (!profileNameSuggestion) return;
+    setNameDraft(profileNameSuggestion);
+    setProfileNameError('');
+    setProfileNameSuggestion(null);
+  };
+
+  const handleProfileImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    setProfileImageError('');
+    try {
+      setProfileImageDraft(await readProfileImage(file));
+    } catch (imageError) {
+      setProfileImageError(imageError instanceof Error ? imageError.message : 'Could not use that profile image.');
+    }
   };
 
   const nextOnboardingStep = () => {
@@ -666,13 +891,33 @@ function App() {
     void refetch();
   };
 
+  if (profileLoading) {
+    return <main className="profile-loading-screen"><Loader2 size={23} className="spin" /> Loading your profile…</main>;
+  }
+
+  if (profileLoadError) {
+    return (
+      <main className="profile-loading-screen profile-loading-error" role="alert">
+        <p>{profileLoadError}</p>
+        <button type="button" onClick={() => window.location.reload()}>Try again</button>
+      </main>
+    );
+  }
+
   if (onboardingStep >= 0) {
     return (
       <WelcomeFlow
         step={onboardingStep}
         displayName={nameDraft}
-        onDisplayNameChange={setNameDraft}
+        onDisplayNameChange={(name) => {
+          setNameDraft(name);
+          setProfileNameError('');
+          setProfileNameSuggestion(null);
+        }}
         onStart={startOnboarding}
+        nameError={profileNameError}
+        suggestedName={profileNameSuggestion}
+        onChooseSuggestedName={chooseSuggestedName}
         onBack={previousOnboardingStep}
         onNext={nextOnboardingStep}
       />
@@ -754,7 +999,7 @@ function App() {
         <div className="profile-card">
           <div className="profile-heading">YOUR PROFILE</div>
           <div className="profile-row">
-            <Avatar name={user.name || 'You'} color={user.color} />
+            <Avatar name={user.name || 'You'} color={user.color} avatarUrl={user.avatarUrl} />
             <div className="profile-fields">
               <strong className="profile-name">{user.name}</strong>
               <span className="profile-label">Display name</span>
@@ -765,6 +1010,10 @@ function App() {
             type="button"
             onClick={() => {
               setNameDraft(user.name);
+              setProfileImageDraft(undefined);
+              setProfileNameError('');
+              setProfileNameSuggestion(null);
+              setProfileImageError('');
               setProfileDialogOpen(true);
             }}
           >
@@ -783,9 +1032,28 @@ function App() {
             if (event.key === 'Escape') setProfileDialogOpen(false);
           }}
         >
-          <form className="profile-dialog" onSubmit={saveName} role="dialog" aria-modal="true" aria-labelledby="profile-dialog-title">
+          <form className="profile-dialog" onSubmit={(event) => void saveName(event)} role="dialog" aria-modal="true" aria-labelledby="profile-dialog-title">
             <button type="button" className="profile-dialog-close" onClick={() => setProfileDialogOpen(false)} aria-label="Close profile editor"><X size={17} /></button>
-            <div className="profile-dialog-avatar"><Avatar name={user.name} color={user.color} /></div>
+            <div className="profile-dialog-avatar">
+              <Avatar
+                name={user.name}
+                color={user.color}
+                avatarUrl={profileImageDraft === undefined ? user.avatarUrl : profileImageDraft}
+              />
+              <div className="profile-image-actions">
+                <label className="profile-image-choose" htmlFor="profile-image-file">Change photo</label>
+                {(profileImageDraft === undefined ? user.avatarUrl : profileImageDraft) && (
+                  <button type="button" className="profile-image-remove" onClick={() => setProfileImageDraft(null)}>Remove</button>
+                )}
+                <input
+                  id="profile-image-file"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => void handleProfileImageChange(event)}
+                />
+                <span>PNG, JPEG, or WebP · max 512 KB</span>
+              </div>
+            </div>
             <span className="eyebrow">YOUR PROFILE</span>
             <h2 id="profile-dialog-title">Edit your profile</h2>
             <p>Change how your name appears to people in your rooms.</p>
@@ -794,14 +1062,33 @@ function App() {
               autoFocus
               id="profile-display-name"
               value={nameDraft}
-              onChange={(event) => setNameDraft(event.target.value)}
+              onChange={(event) => {
+                setNameDraft(event.target.value);
+                setProfileNameError('');
+                setProfileNameSuggestion(null);
+              }}
               placeholder="What should we call you?"
               maxLength={32}
               required
             />
+            {profileNameError && (
+              <div className="profile-name-error" role="alert">
+                <span>{profileNameError}</span>
+                {profileNameSuggestion && (
+                  <button type="button" onClick={chooseSuggestedName}>Use “{profileNameSuggestion}”</button>
+                )}
+              </div>
+            )}
+            {profileImageError && <div className="profile-name-error" role="alert">{profileImageError}</div>}
             <div className="profile-dialog-actions">
               <button type="button" className="profile-dialog-cancel" onClick={() => setProfileDialogOpen(false)}>Cancel</button>
-              <button type="submit" className="profile-dialog-save" disabled={!nameDraft.trim() || nameDraft.trim() === user.name}>Save changes</button>
+              <button
+                type="submit"
+                className="profile-dialog-save"
+                disabled={!nameDraft.trim() || (nameDraft.trim() === user.name && profileImageDraft === undefined)}
+              >
+                Save changes
+              </button>
             </div>
           </form>
         </div>
@@ -816,7 +1103,7 @@ function App() {
           <div className="topbar-user">
             <Radio size={14} />
             <span>{user.name || 'Guest'}</span>
-            <Avatar name={user.name || 'You'} color={user.color} size="small" />
+            <Avatar name={user.name || 'You'} color={user.color} avatarUrl={user.avatarUrl} size="small" />
           </div>
         </header>
 

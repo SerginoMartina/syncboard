@@ -21,6 +21,8 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 ### 4. Concurrency & Presence
 - **Remote Cursors:** Real-time presence of other users' mouse positions to improve collaboration UX.
 - **Room Isolation:** Drawings and chat are sent only to collaborators connected to the selected Socket.IO room.
+- **Profiles:** Display names are reserved globally and case-insensitively in PostgreSQL. If a name is taken, SyncBoard offers an available alternative. Optional PNG, JPEG, and WebP profile images are stored in the SyncBoard schema.
+- **Chat controls:** Authors can edit or remove their own persisted messages; changes are shared live with everyone in the room.
 - **Board controls:** Room owners can delete rooms; expand a board for a scrollable workspace, pan with Space+drag, and press Escape to minimize. Room chat floats over the canvas and can be opened or closed without leaving the board.
 - **Private local assistant:** Use the AI button in chat to ask a question answered by a self-hosted Ollama model. Prompts go only from the browser to this app's server and the configured local model; they are not broadcast, persisted, or sent to a hosted AI provider. When asked to draw, the assistant proposes a board drawing in chat; it is added to the shared board only after a collaborator approves it.
 - **Getting started:** New users choose a display name and get a short, multi-page introduction. The name can be changed later from the profile editor.
@@ -49,7 +51,7 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 
 SyncBoard's PostgreSQL objects live in the dedicated `syncboard` schema, so
 they do not share the default `public` namespace with other applications using
-the same database. The schema contains rooms, canvas shapes, chat messages, and polls with options
+the same database. The schema contains profiles, rooms, canvas shapes, chat messages, and polls with options
 and votes; deleting a room also deletes its associated data. The server applies the
 idempotent DDL on every startup, including when deployed against an existing
 database. Set `DATABASE_URL` to the PostgreSQL connection URL in the API

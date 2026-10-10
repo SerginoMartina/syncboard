@@ -12,6 +12,20 @@ CREATE TABLE IF NOT EXISTS syncboard.rooms (
 CREATE UNIQUE INDEX IF NOT EXISTS rooms_name_case_insensitive_unique_idx
     ON syncboard.rooms (lower(btrim(name)));
 
+CREATE TABLE IF NOT EXISTS syncboard.profiles (
+    id text PRIMARY KEY,
+    display_name text NOT NULL CHECK (length(btrim(display_name)) BETWEEN 1 AND 32),
+    color text NOT NULL CHECK (color ~ '^#[0-9A-Fa-f]{6}$'),
+    avatar_mime text,
+    avatar_data bytea,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK ((avatar_mime IS NULL) = (avatar_data IS NULL)),
+    CHECK (avatar_mime IS NULL OR avatar_mime IN ('image/png', 'image/jpeg', 'image/webp'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS profiles_display_name_unique_idx
+    ON syncboard.profiles (lower(btrim(display_name)));
+
 CREATE TABLE IF NOT EXISTS syncboard.canvas_shapes (
     room_id text NOT NULL REFERENCES syncboard.rooms (id) ON DELETE CASCADE,
     id text NOT NULL,
@@ -70,8 +84,12 @@ CREATE TABLE IF NOT EXISTS syncboard.chat_messages (
     user_name text NOT NULL CHECK (length(btrim(user_name)) > 0),
     user_color text NOT NULL CHECK (user_color ~ '^#[0-9A-Fa-f]{6}$'),
     body text NOT NULL CHECK (length(btrim(body)) > 0 AND length(body) <= 2000),
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    edited_at timestamptz
 );
+
+ALTER TABLE syncboard.chat_messages
+    ADD COLUMN IF NOT EXISTS edited_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS chat_messages_room_created_at_idx
     ON syncboard.chat_messages (room_id, created_at, id);

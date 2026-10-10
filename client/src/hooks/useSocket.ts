@@ -11,6 +11,7 @@ export type RoomUser = {
   userId: string;
   name: string;
   color: string;
+  avatarUrl: string | null;
   socketId: string;
 };
 
@@ -19,8 +20,10 @@ export type ChatMessage = {
   userId: string;
   name: string;
   color: string;
+  avatarUrl: string | null;
   body: string;
   createdAt: string;
+  editedAt: string | null;
 };
 
 export type ChatPoll = {
@@ -37,9 +40,13 @@ export type GuestUser = {
   id: string;
   name: string;
   color: string;
+  avatarUrl: string | null;
 };
 
 const socket: Socket = io(API_URL, { autoConnect: false });
+const absoluteAvatarUrl = (url: string | null): string | null => (
+  url ? new URL(url, API_URL).toString() : null
+);
 
 export const useSocket = (roomId: string, user: GuestUser) => {
   const [isConnected, setIsConnected] = useState(socket.connected);
@@ -77,11 +84,18 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       const shapesById = new Map(state.shapes.map((shape) => [shape.id, shape]));
       useCanvasStore.getState().shapes.forEach((shape) => shapesById.set(shape.id, shape));
       setShapes([...shapesById.values()]);
+      const loadedMessages = state.messages.map((message) => ({
+        ...message,
+        avatarUrl: absoluteAvatarUrl(message.avatarUrl),
+      }));
       setMessages((current) => (
-        [...new Map([...state.messages, ...current].map((message) => [message.id, message])).values()].slice(-100)
+        [...new Map([...loadedMessages, ...current].map((message) => [message.id, message])).values()].slice(-100)
       ));
       setPolls(state.polls);
-      setPresence(state.presence);
+      setPresence(state.presence.map((member) => ({
+        ...member,
+        avatarUrl: absoluteAvatarUrl(member.avatarUrl),
+      })));
       const presentIds = new Set(state.presence.map((member) => member.userId));
       setRemoteCursors(
         Object.fromEntries(
@@ -92,7 +106,10 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     };
     const handlePresence = (update: { roomId: string; users: RoomUser[] }) => {
       if (update.roomId !== roomId) return;
-      setPresence(update.users);
+      setPresence(update.users.map((member) => ({
+        ...member,
+        avatarUrl: absoluteAvatarUrl(member.avatarUrl),
+      })));
       const presentIds = new Set(update.users.map((member) => member.userId));
       setRemoteCursors(
         Object.fromEntries(
@@ -109,12 +126,29 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     };
     const handleMessage = (event: { roomId: string; message: ChatMessage }) => {
       if (event.roomId !== roomId) return;
-      const message = event.message;
+      const message = {
+        ...event.message,
+        avatarUrl: absoluteAvatarUrl(event.message.avatarUrl),
+      };
       setMessages((current) => (
         current.some((item) => item.id === message.id)
           ? current
           : [...current, message].slice(-100)
       ));
+    };
+    const handleMessageUpdated = (event: { roomId: string; message: ChatMessage }) => {
+      if (event.roomId !== roomId) return;
+      const updatedMessage = {
+        ...event.message,
+        avatarUrl: absoluteAvatarUrl(event.message.avatarUrl),
+      };
+      setMessages((current) => current.map((message) => (
+        message.id === updatedMessage.id ? updatedMessage : message
+      )));
+    };
+    const handleMessageDeleted = (event: { roomId: string; messageId: string }) => {
+      if (event.roomId !== roomId) return;
+      setMessages((current) => current.filter((message) => message.id !== event.messageId));
     };
     const handlePollCreated = (event: { roomId: string; poll: ChatPoll }) => {
       if (event.roomId !== roomId) return;
@@ -153,6 +187,8 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     socket.on('draw', handleDraw);
     socket.on('cursor_move', handleCursorMove);
     socket.on('chat_message', handleMessage);
+    socket.on('chat_message_updated', handleMessageUpdated);
+    socket.on('chat_message_deleted', handleMessageDeleted);
     socket.on('chat_poll_created', handlePollCreated);
     socket.on('chat_poll_updated', handlePollUpdated);
     socket.on('action_error', handleActionError);
@@ -170,6 +206,8 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       socket.off('draw', handleDraw);
       socket.off('cursor_move', handleCursorMove);
       socket.off('chat_message', handleMessage);
+      socket.off('chat_message_updated', handleMessageUpdated);
+      socket.off('chat_message_deleted', handleMessageDeleted);
       socket.off('chat_poll_created', handlePollCreated);
       socket.off('chat_poll_updated', handlePollUpdated);
       socket.off('action_error', handleActionError);
@@ -178,7 +216,7 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       setPresence([]);
       setRemoteCursors({});
     };
-  }, [roomId, user.id, user.name, user.color, addShape, setShapes, updateRemoteCursor, setRemoteCursors]);
+  }, [roomId, user.id, user.name, user.color, user.avatarUrl, addShape, setShapes, updateRemoteCursor, setRemoteCursors]);
 
   const sendDraw = useCallback((shape: Shape) => {
     if (!socket.connected) {
@@ -203,6 +241,26 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     socket.emit('chat_message', body);
   }, []);
 
+  const updateChatMessage = useCallback((
+    event: 'edit_chat_message' | 'delete_chat_message',
+    request: { messageId: string; body?: string },
+  ) => new Promise<boolean>((resolve) => {
+    if (!socket.connected) {
+      setError('Connection lost. Your chat update was not sent.');
+      resolve(false);
+      return;
+    }
+    socket.timeout(8000).emit(event, request, (timeoutError: Error | null, result: { ok?: boolean; error?: string }) => {
+      if (timeoutError || !result?.ok) {
+        setError(result?.error || 'The chat update could not be confirmed. Please try again.');
+        resolve(false);
+        return;
+      }
+      setError('');
+      resolve(true);
+    });
+  }), []);
+
   return {
     isConnected,
     presence,
@@ -214,6 +272,14 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     sendDraw,
     sendCursor,
     sendMessage,
+    editMessage: (messageId: string, body: string) => updateChatMessage(
+      'edit_chat_message',
+      { messageId, body },
+    ),
+    deleteMessage: (messageId: string) => updateChatMessage(
+      'delete_chat_message',
+      { messageId },
+    ),
     createPoll: (question: string, options: string[]) => {
       if (!socket.connected) {
         setError('Connection lost. Your poll was not created.');

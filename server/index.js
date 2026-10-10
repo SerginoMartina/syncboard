@@ -5,12 +5,14 @@ import cors from 'cors';
 import { Server } from 'socket.io';
 import assistantRouter from './routes/assistant.js';
 import createRoomsRouter from './routes/rooms.js';
+import createProfilesRouter from './routes/profiles.js';
 import { initializeDatabase, pool } from './db.js';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use('/api/rooms', assistantRouter);
+app.use('/api/profiles', createProfilesRouter());
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -32,12 +34,11 @@ app.use('/api/rooms', createRoomsRouter({
   },
 }));
 
-const nameIsValid = (name) => typeof name === 'string' && name.trim().length > 0 && name.trim().length <= 32;
 const colorIsValid = (color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color);
 
 const presenceForRoom = (roomId) => [...activeUsers.values()]
   .filter((user) => user.roomId === roomId)
-  .map(({ userId, name, color, socketId }) => ({ userId, name, color, socketId }));
+  .map(({ userId, name, color, avatarUrl, socketId }) => ({ userId, name, color, avatarUrl, socketId }));
 
 const publishPresence = (roomId) => {
   io.to(roomId).emit('presence_update', {
@@ -79,21 +80,34 @@ io.on('connection', (socket) => {
     socket.data.requestedRoomId = request?.roomId;
     const roomId = typeof request?.roomId === 'string' ? request.roomId : '';
     const user = request?.user;
-    if (!roomId || !nameIsValid(user?.name) || !colorIsValid(user?.color) || typeof user?.id !== 'string' || !user.id) {
-      socket.emit('action_error', 'Enter a valid name before joining a room.');
+    if (!roomId || typeof user?.id !== 'string' || !user.id) {
+      socket.emit('action_error', 'Set up your profile before joining a room.');
       return;
     }
 
     try {
-      const { rows: roomRows } = await pool.query(
-        'SELECT id FROM syncboard.rooms WHERE id = $1',
-        [roomId],
-      );
+      const [{ rows: roomRows }, { rows: profileRows }] = await Promise.all([
+        pool.query('SELECT id FROM syncboard.rooms WHERE id = $1', [roomId]),
+        pool.query(
+          `SELECT id, display_name AS name, color, avatar_mime AS "avatarMime",
+                  updated_at AS "updatedAt"
+           FROM syncboard.profiles WHERE id = $1`,
+          [user.id],
+        ),
+      ]);
       if (socket.data.joinAttempt !== joinAttempt) return;
       if (!roomRows.length) {
         socket.emit('room_not_found', roomId);
         return;
       }
+      if (!profileRows.length) {
+        socket.emit('action_error', 'Save a unique display name before joining a room.');
+        return;
+      }
+      const profile = profileRows[0];
+      const avatarUrl = profile.avatarMime
+        ? `/api/profiles/${encodeURIComponent(profile.id)}/avatar?v=${encodeURIComponent(new Date(profile.updatedAt).getTime())}`
+        : null;
 
       const previousRoomId = socket.data.roomId;
       if (previousRoomId) {
@@ -107,9 +121,10 @@ io.on('connection', (socket) => {
       activeUsers.set(socket.id, {
         socketId: socket.id,
         roomId,
-        userId: user.id,
-        name: user.name.trim(),
-        color: user.color,
+        userId: profile.id,
+        name: profile.name,
+        color: profile.color,
+        avatarUrl,
       });
 
       const [shapeResult, messageResult, polls] = await Promise.all([
@@ -122,15 +137,20 @@ io.on('connection', (socket) => {
           [roomId],
         ),
         pool.query(
-          `SELECT id, user_id AS "userId", user_name AS name, user_color AS color,
-                  body, created_at AS "createdAt"
-           FROM syncboard.chat_messages
-           WHERE room_id = $1
-           ORDER BY created_at DESC, id DESC
+          `SELECT m.id, m.user_id AS "userId", m.user_name AS name, m.user_color AS color,
+                  m.body, m.created_at AS "createdAt", m.edited_at AS "editedAt",
+                  CASE WHEN p.avatar_mime IS NOT NULL
+                       THEN '/api/profiles/' || m.user_id || '/avatar?v=' ||
+                            (extract(epoch from p.updated_at) * 1000)::bigint
+                       ELSE NULL END AS "avatarUrl"
+           FROM syncboard.chat_messages m
+           LEFT JOIN syncboard.profiles p ON p.id = m.user_id
+           WHERE m.room_id = $1
+           ORDER BY m.created_at DESC, m.id DESC
            LIMIT 100`,
           [roomId],
         ),
-        pollsForRoom(roomId, user.id),
+        pollsForRoom(roomId, profile.id),
       ]);
 
       if (socket.data.joinAttempt !== joinAttempt) return;
@@ -205,17 +225,90 @@ io.on('connection', (socket) => {
 
     try {
       const { rows } = await pool.query(
-        `INSERT INTO syncboard.chat_messages
-           (id, room_id, user_id, user_name, user_color, body)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, user_id AS "userId", user_name AS name,
-                   user_color AS color, body, created_at AS "createdAt"`,
+        `WITH inserted AS (
+           INSERT INTO syncboard.chat_messages
+             (id, room_id, user_id, user_name, user_color, body)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, user_id, user_name, user_color, body, created_at, edited_at
+         )
+         SELECT i.id, i.user_id AS "userId", i.user_name AS name, i.user_color AS color,
+                i.body, i.created_at AS "createdAt", i.edited_at AS "editedAt",
+                CASE WHEN p.avatar_mime IS NOT NULL
+                     THEN '/api/profiles/' || i.user_id || '/avatar?v=' ||
+                          (extract(epoch from p.updated_at) * 1000)::bigint
+                     ELSE NULL END AS "avatarUrl"
+         FROM inserted i
+         LEFT JOIN syncboard.profiles p ON p.id = i.user_id`,
         [randomUUID(), roomId, user.userId, user.name, user.color, message],
       );
       io.to(roomId).emit('chat_message', { roomId, message: rows[0] });
     } catch (error) {
       console.error('Failed to save chat message:', error);
       socket.emit('action_error', 'Could not send your message.');
+    }
+  });
+
+  socket.on('edit_chat_message', async (request, acknowledge = () => {}) => {
+    const roomId = socket.data.roomId;
+    const user = activeUsers.get(socket.id);
+    const messageId = typeof request?.messageId === 'string' ? request.messageId : '';
+    const body = typeof request?.body === 'string' ? request.body.trim() : '';
+    if (!roomId || !user || !messageId || !body || body.length > 2000) {
+      acknowledge({ ok: false, error: 'Messages must be between 1 and 2000 characters.' });
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `UPDATE syncboard.chat_messages m
+         SET body = $4, edited_at = now()
+         FROM syncboard.profiles p
+         WHERE m.id = $1 AND m.room_id = $2 AND m.user_id = $3 AND p.id = m.user_id
+         RETURNING m.id, m.user_id AS "userId", m.user_name AS name, m.user_color AS color,
+                   m.body, m.created_at AS "createdAt", m.edited_at AS "editedAt",
+                   CASE WHEN p.avatar_mime IS NOT NULL
+                        THEN '/api/profiles/' || m.user_id || '/avatar?v=' ||
+                             (extract(epoch from p.updated_at) * 1000)::bigint
+                        ELSE NULL END AS "avatarUrl"`,
+        [messageId, roomId, user.userId, body],
+      );
+      if (!rows.length) {
+        acknowledge({ ok: false, error: 'Message not found or you cannot edit it.' });
+        return;
+      }
+      io.to(roomId).emit('chat_message_updated', { roomId, message: rows[0] });
+      acknowledge({ ok: true });
+    } catch (error) {
+      console.error('Failed to edit chat message:', error);
+      acknowledge({ ok: false, error: 'Could not edit your message. Please try again.' });
+    }
+  });
+
+  socket.on('delete_chat_message', async (request, acknowledge = () => {}) => {
+    const roomId = socket.data.roomId;
+    const user = activeUsers.get(socket.id);
+    const messageId = typeof request?.messageId === 'string' ? request.messageId : '';
+    if (!roomId || !user || !messageId) {
+      acknowledge({ ok: false, error: 'Could not remove that message.' });
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `DELETE FROM syncboard.chat_messages
+         WHERE id = $1 AND room_id = $2 AND user_id = $3
+         RETURNING id`,
+        [messageId, roomId, user.userId],
+      );
+      if (!rows.length) {
+        acknowledge({ ok: false, error: 'Message not found or you cannot remove it.' });
+        return;
+      }
+      io.to(roomId).emit('chat_message_deleted', { roomId, messageId });
+      acknowledge({ ok: true });
+    } catch (error) {
+      console.error('Failed to delete chat message:', error);
+      acknowledge({ ok: false, error: 'Could not remove your message. Please try again.' });
     }
   });
 
