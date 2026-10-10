@@ -138,7 +138,7 @@ io.on('connection', (socket) => {
     const roomId = socket.data.roomId;
     const textShape = shape?.type === 'text';
     if (!roomId || typeof shape?.id !== 'string' ||
-        !['line', 'rect', 'freehand', 'text'].includes(shape.type) ||
+        !['line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text'].includes(shape.type) ||
         !Array.isArray(shape.points) ||
         !shape.points.every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) ||
         !colorIsValid(shape.color) || !Number.isFinite(shape.width) || shape.width <= 0 ||

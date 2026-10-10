@@ -1,7 +1,7 @@
 # SyncBoard 🎨
 **A real-time collaborative whiteboard for sharing ideas with your team.**
 
-SyncBoard is a collaborative workspace where multiple users can draw freehand, add straight lines and text, and chat in real time. Room content is stored in PostgreSQL and restored when collaborators return. The room header shows which collaborators are online.
+SyncBoard is a collaborative workspace where multiple users can draw freehand, use lines, arrows, rectangles, ellipses, and a highlighter, add text, and chat in real time. Room content is stored in PostgreSQL and restored when collaborators return. The room header shows which collaborators are online.
 
 ---
 
@@ -21,7 +21,7 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 ### 4. Concurrency & Presence
 - **Remote Cursors:** Real-time presence of other users' mouse positions to improve collaboration UX.
 - **Room Isolation:** Drawings and chat are sent only to collaborators connected to the selected Socket.IO room.
-- **Board controls:** Room owners can delete rooms; expand a board for a scrollable workspace, pan with Space+drag, and press Escape to minimize.
+- **Board controls:** Room owners can delete rooms; expand a board for a scrollable workspace, pan with Space+drag, and press Escape to minimize. Room chat floats over the canvas and can be opened or closed without leaving the board.
 
 ---
 

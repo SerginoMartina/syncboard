@@ -15,7 +15,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS rooms_name_case_insensitive_unique_idx
 CREATE TABLE IF NOT EXISTS syncboard.canvas_shapes (
     room_id text NOT NULL REFERENCES syncboard.rooms (id) ON DELETE CASCADE,
     id text NOT NULL,
-    type text NOT NULL CHECK (type IN ('line', 'rect', 'freehand', 'text')),
+    type text NOT NULL CHECK (type IN ('line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text')),
     points jsonb NOT NULL CHECK (jsonb_typeof(points) = 'array'),
     color text NOT NULL CHECK (length(btrim(color)) > 0),
     width double precision NOT NULL CHECK (width > 0),
@@ -35,12 +35,14 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint
-        WHERE conname = 'canvas_shapes_type_allowed'
+        WHERE conname = 'canvas_shapes_type_allowed_v2'
           AND conrelid = 'syncboard.canvas_shapes'::regclass
     ) THEN
         ALTER TABLE syncboard.canvas_shapes
-            ADD CONSTRAINT canvas_shapes_type_allowed
-            CHECK (type IN ('line', 'rect', 'freehand', 'text'));
+            DROP CONSTRAINT IF EXISTS canvas_shapes_type_allowed;
+        ALTER TABLE syncboard.canvas_shapes
+            ADD CONSTRAINT canvas_shapes_type_allowed_v2
+            CHECK (type IN ('line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text'));
     END IF;
 
     IF NOT EXISTS (

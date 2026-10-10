@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUp, Check, Circle, Expand, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Square, Trash2, Type } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowUpRight, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Square, Trash2, Type, X } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
 import { useSocket, type ChatMessage, type GuestUser, type RoomUser } from './hooks/useSocket';
@@ -47,7 +47,7 @@ function RoomWorkspace({
   onToggleExpanded: () => void;
 }) {
   const [messageDraft, setMessageDraft] = useState('');
-  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const currentTool = useCanvasStore((state) => state.currentTool);
   const setTool = useCanvasStore((state) => state.setTool);
@@ -93,14 +93,6 @@ function RoomWorkspace({
             <h2>{room.name}</h2>
           </div>
         </div>
-        <button
-          className="mobile-chat-toggle"
-          onClick={() => setMobileChatOpen((open) => !open)}
-          aria-label={mobileChatOpen ? 'Back to board' : 'Open room chat'}
-        >
-          {mobileChatOpen ? <Pencil size={15} /> : <MessageCircle size={15} />}
-          {mobileChatOpen ? 'Board' : 'Chat'}
-        </button>
         <div className="presence-area">
           <span className="online-indicator"><Circle size={8} fill="currentColor" /> Online</span>
           <div className="avatar-stack" aria-label={`${presence.length} people in this room`}>
@@ -121,21 +113,17 @@ function RoomWorkspace({
         </div>
       </div>
 
-      <div className={`workbench ${mobileChatOpen ? 'mobile-chat-view' : ''}`}>
+      <div className="workbench">
         <div className="canvas-column">
           <div className="canvas-toolbar">
-            <div className="tool-select">
-              {currentTool === 'line' ? <Minus size={15} /> : currentTool === 'rect' ? <Square size={15} /> : currentTool === 'text' ? <Type size={15} /> : <Pencil size={15} />}
-              <select
-                aria-label="Drawing tool"
-                value={currentTool}
-                onChange={(event) => setTool(event.target.value as typeof currentTool)}
-              >
-                <option value="freehand">Pen</option>
-                <option value="line">Line</option>
-                <option value="rect">Rectangle</option>
-                <option value="text">Text</option>
-              </select>
+            <div className="drawing-tools" role="toolbar" aria-label="Drawing tools">
+              <button type="button" className={currentTool === 'freehand' ? 'drawing-tool-active' : ''} onClick={() => setTool('freehand')} aria-label="Pen" title="Pen" aria-pressed={currentTool === 'freehand'}><Pencil size={16} /></button>
+              <button type="button" className={currentTool === 'line' ? 'drawing-tool-active' : ''} onClick={() => setTool('line')} aria-label="Line" title="Line" aria-pressed={currentTool === 'line'}><Minus size={16} /></button>
+              <button type="button" className={currentTool === 'rect' ? 'drawing-tool-active' : ''} onClick={() => setTool('rect')} aria-label="Rectangle" title="Rectangle" aria-pressed={currentTool === 'rect'}><Square size={16} /></button>
+              <button type="button" className={currentTool === 'ellipse' ? 'drawing-tool-active' : ''} onClick={() => setTool('ellipse')} aria-label="Ellipse" title="Ellipse" aria-pressed={currentTool === 'ellipse'}><Circle size={16} /></button>
+              <button type="button" className={currentTool === 'arrow' ? 'drawing-tool-active' : ''} onClick={() => setTool('arrow')} aria-label="Arrow" title="Arrow" aria-pressed={currentTool === 'arrow'}><ArrowUpRight size={16} /></button>
+              <button type="button" className={currentTool === 'highlighter' ? 'drawing-tool-active' : ''} onClick={() => setTool('highlighter')} aria-label="Highlighter" title="Highlighter" aria-pressed={currentTool === 'highlighter'}><Highlighter size={16} /></button>
+              <button type="button" className={currentTool === 'text' ? 'drawing-tool-active' : ''} onClick={() => setTool('text')} aria-label="Text" title="Text" aria-pressed={currentTool === 'text'}><Type size={16} /></button>
             </div>
             <label className="color-control" title="Choose drawing color">
               <input
@@ -156,7 +144,7 @@ function RoomWorkspace({
               {expanded ? <Minimize2 size={15} /> : <Expand size={15} />}
               <span>{expanded ? 'Minimize' : 'Full screen'}</span>
             </button>
-            <span className="toolbar-hint">{currentTool === 'line' ? 'Drag to draw a straight line' : currentTool === 'text' ? 'Click anywhere to add a text label' : 'Draw together, in real time'}</span>
+            <span className="toolbar-hint">{currentTool === 'line' ? 'Drag to draw a straight line' : currentTool === 'arrow' ? 'Drag to draw an arrow' : currentTool === 'ellipse' ? 'Drag to draw an ellipse' : currentTool === 'highlighter' ? 'Drag to highlight an area' : currentTool === 'text' ? 'Click anywhere to add a text label' : 'Draw together, in real time'}</span>
           </div>
           <div className="canvas-frame">
             <Canvas userId={user.id} sendDraw={sendDraw} sendCursor={sendCursor} expanded={expanded} />
@@ -169,13 +157,16 @@ function RoomWorkspace({
           )}
         </div>
 
-        <aside className="chat-panel" aria-label="Room chat">
+        {chatOpen && <aside className="chat-panel" aria-label="Room chat">
           <div className="chat-header">
             <div className="chat-title-icon"><MessageCircle size={16} /></div>
             <div>
               <h3>Room chat</h3>
               <p>Say hello to your collaborators</p>
             </div>
+            <button type="button" className="chat-close-button" onClick={() => setChatOpen(false)} aria-label="Close room chat" title="Close chat">
+              <X size={16} />
+            </button>
           </div>
           <div className="chat-messages" aria-live="polite">
             {messages.length === 0 ? (
@@ -220,7 +211,13 @@ function RoomWorkspace({
             </button>
             <span>Enter to send · Shift + Enter for a new line</span>
           </form>
-        </aside>
+        </aside>}
+        {!chatOpen && (
+          <button type="button" className="chat-launcher" onClick={() => setChatOpen(true)} aria-label="Open room chat">
+            <MessageCircle size={18} />
+            <span>Chat</span>
+          </button>
+        )}
       </div>
     </section>
   );

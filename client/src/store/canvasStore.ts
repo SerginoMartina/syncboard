@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type CanvasTool = 'line' | 'rect' | 'freehand' | 'text';
+export type CanvasTool = 'line' | 'rect' | 'ellipse' | 'arrow' | 'freehand' | 'highlighter' | 'text';
 
 export type Shape = {
   id: string;
