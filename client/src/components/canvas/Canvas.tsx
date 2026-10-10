@@ -314,7 +314,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
   useEffect(() => {
     const handleDeleteKey = (event: KeyboardEvent) => {
-      if (currentTool !== '' || !selectedShapeId ||
+      if (!selectedShapeId ||
           event.target instanceof HTMLElement &&
           (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName))) return;
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
@@ -333,13 +333,17 @@ const Canvas: React.FC<CanvasProps> = ({
     return [event.clientX - rect.left, event.clientY - rect.top] as [number, number];
   };
 
-  const makeShape = (tool: CanvasTool, point: [number, number]): Shape => ({
-    id: crypto.randomUUID(),
-    type: tool === 'text' ? 'freehand' : tool,
-    points: [point],
-    color: currentColor,
-    width: tool === 'highlighter' ? 14 : 2,
-  });
+  const makeShape = (tool: CanvasTool, point: [number, number]): Shape | null => {
+    // Cannot create shapes while in select mode
+    if (tool === 'select') return null;
+    return {
+      id: crypto.randomUUID(),
+      type: tool === 'text' ? 'freehand' : tool,
+      points: [point],
+      color: currentColor,
+      width: tool === 'highlighter' ? 14 : 2,
+    };
+  };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0 || spaceDownRef.current) return;
