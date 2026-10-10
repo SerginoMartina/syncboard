@@ -314,7 +314,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
   useEffect(() => {
     const handleDeleteKey = (event: KeyboardEvent) => {
-      if (currentTool !== 'select' || !selectedShapeId ||
+      if (currentTool !== '' || !selectedShapeId ||
           event.target instanceof HTMLElement &&
           (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName))) return;
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
