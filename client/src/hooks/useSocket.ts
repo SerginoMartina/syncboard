@@ -183,10 +183,11 @@ export const useSocket = (roomId: string, user: GuestUser) => {
   const sendDraw = useCallback((shape: Shape) => {
     if (!socket.connected) {
       setError('Connection lost. Your drawing was not sent.');
-      return;
+      return false;
     }
     setError('');
     socket.emit('draw', shape);
+    return true;
   }, []);
 
   const sendCursor = useCallback((x: number, y: number) => {

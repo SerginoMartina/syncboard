@@ -6,6 +6,7 @@ type CanvasProps = {
   sendDraw: (shape: Shape) => void;
   sendCursor: (x: number, y: number) => void;
   expanded: boolean;
+  onCanvasSizeChange: (size: { width: number; height: number }) => void;
 };
 
 type TextDraft = {
@@ -68,11 +69,12 @@ const drawShape = (ctx: CanvasRenderingContext2D, shape: Shape) => {
   ctx.restore();
 };
 
-const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor, expanded }) => {
+const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor, expanded, onCanvasSizeChange }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
   const drawingRef = useRef<Shape | null>(null);
+  const canvasSizeRef = useRef({ width: 0, height: 0 });
   const spaceDownRef = useRef(false);
   const panRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -88,6 +90,10 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor, expanded 
 
     const render = () => {
       const { width, height } = canvas.getBoundingClientRect();
+      if (canvasSizeRef.current.width !== width || canvasSizeRef.current.height !== height) {
+        canvasSizeRef.current = { width, height };
+        onCanvasSizeChange({ width, height });
+      }
       const pixelRatio = window.devicePixelRatio || 1;
       const targetWidth = Math.round(width * pixelRatio);
       const targetHeight = Math.round(height * pixelRatio);
@@ -120,7 +126,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, sendDraw, sendCursor, expanded 
     return () => {
       resizeObserver.disconnect();
     };
-  }, [shapes, currentShape, remoteCursors, userId]);
+  }, [shapes, currentShape, remoteCursors, userId, onCanvasSizeChange]);
 
   useEffect(() => {
     if (textDraft) textInputRef.current?.focus();

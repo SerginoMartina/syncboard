@@ -60,8 +60,58 @@ button:disabled { cursor: not-allowed; }
 .profile-fields { min-width: 0; flex: 1; }
 .profile-fields label { margin-bottom: 4px; font-size: 10px; }
 .profile-fields input { width: 100%; padding: 6px 7px; color: #35374b; background: #fff; border: 1px solid #e6e6ed; border-radius: 6px; outline: 0; font-size: 11px; }
-.save-profile-button { display: flex; align-items: center; justify-content: center; gap: 5px; width: 100%; height: 29px; margin-top: 10px; color: #b64048; background: #fff0ee; border: 0; border-radius: 7px; font-size: 10px; font-weight: 650; }
-.save-profile-button:disabled { color: #bd777b; background: #fff7f6; }
+.profile-fields { display: flex; flex-direction: column; gap: 4px; }
+.profile-name { overflow: hidden; color: #45475a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.profile-label { color: #999bab; font-size: 9px; }
+.edit-profile-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 31px; margin-top: 10px; color: #b64048; background: #fff0ee; border: 0; border-radius: 7px; font-size: 10px; font-weight: 650; }
+.edit-profile-button:hover { background: #ffe7e4; }
+.profile-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: #21191b66; backdrop-filter: blur(3px); }
+.profile-dialog { position: relative; width: min(100%, 390px); padding: 28px; background: #fff; border: 1px solid #f0e7e5; border-radius: 16px; box-shadow: 0 24px 80px #24151738; }
+.profile-dialog-close { position: absolute; top: 13px; right: 13px; display: grid; width: 31px; height: 31px; place-items: center; color: #858696; background: #f6f5f7; border: 0; border-radius: 8px; }
+.profile-dialog-avatar { margin-bottom: 17px; }
+.profile-dialog h2 { margin: 5px 0 7px; color: #292b3e; font-size: 22px; letter-spacing: -.5px; }
+.profile-dialog > p { margin: 0 0 19px; color: #838596; font-size: 11px; line-height: 1.6; }
+.profile-dialog > label { display: block; margin-bottom: 6px; color: #65677a; font-size: 10px; font-weight: 650; }
+.profile-dialog > input { width: 100%; height: 40px; padding: 0 11px; color: #35374b; background: #fff; border: 1px solid #e6e6ed; border-radius: 8px; outline: 0; font-size: 12px; }
+.profile-dialog > input:focus { border-color: #e7a2a4; box-shadow: 0 0 0 3px #d9515914; }
+.profile-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.profile-dialog-actions button { min-height: 34px; padding: 0 12px; border: 0; border-radius: 7px; font-size: 10px; font-weight: 650; }
+.profile-dialog-cancel { color: #727487; background: #f2f2f6; }
+.profile-dialog-save { color: #fff; background: #d95159; }
+.profile-dialog-save:disabled { opacity: .5; }
+.welcome-flow { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow-y: auto; padding: 26px 18px; background: radial-gradient(ellipse at 10% 10%, #fff0ef 0, transparent 42%), radial-gradient(ellipse at 90% 90%, #fff2ee 0, transparent 40%), #fff; }
+.welcome-flow-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 19px; color: #38394a; font-size: 15px; font-weight: 750; }
+.welcome-flow-brand .brand-mark { width: 31px; height: 31px; }
+.welcome-flow-card { width: min(100%, 560px); padding: 34px 40px 28px; background: #fff; border: 1px solid #f0e6e4; border-radius: 20px; box-shadow: 0 24px 80px #39202012; }
+.welcome-flow-icon { display: grid; width: 52px; height: 52px; margin-bottom: 20px; place-items: center; color: #d95159; background: #fff0ee; border-radius: 15px; }
+.welcome-flow-card h1 { margin: 7px 0 10px; color: #292b3e; font-size: clamp(25px, 5vw, 32px); letter-spacing: -1px; }
+.welcome-flow-card > p { max-width: 430px; margin: 0; color: #828496; font-size: 12px; line-height: 1.75; }
+.welcome-name-form { margin-top: 23px; }
+.welcome-name-form label { display: block; margin-bottom: 7px; color: #626477; font-size: 10px; font-weight: 650; }
+.welcome-name-form input { width: 100%; height: 43px; padding: 0 12px; color: #35374b; background: white; border: 1px solid #e6e6ed; border-radius: 8px; outline: 0; font-size: 12px; }
+.welcome-name-form input:focus { border-color: #e7a2a4; box-shadow: 0 0 0 3px #d9515914; }
+.welcome-primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 112px; height: 38px; margin-top: 13px; padding: 0 14px; color: #fff; background: #d95159; border: 0; border-radius: 8px; font-size: 11px; font-weight: 650; }
+.welcome-primary-button:disabled { opacity: .45; }
+.welcome-flow-progress { display: flex; gap: 5px; margin-top: 26px; }
+.welcome-flow-progress span { height: 3px; flex: 1; background: #efedf0; border-radius: 99px; }
+.welcome-flow-progress span.welcome-progress-active { background: #df676e; }
+.welcome-flow-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 23px; padding-top: 17px; border-top: 1px solid #f1edef; }
+.welcome-back-button { display: inline-flex; align-items: center; gap: 6px; min-height: 37px; padding: 0 8px; color: #77798b; background: transparent; border: 0; font-size: 11px; font-weight: 650; }
+.welcome-flow-footer { margin-top: 17px; color: #a0a1ae; font-size: 10px; }
+.drawing-approval { width: 100%; padding: 10px; background: #fffaf9; border: 1px solid #f0e2e0; border-radius: 9px; }
+.drawing-approval > strong { color: #494b5e; font-size: 10px; }
+.drawing-approval > p { margin: 5px 0 9px; color: #767789; font-size: 9px; line-height: 1.5; }
+.drawing-approval-actions { display: flex; align-items: center; gap: 7px; }
+.drawing-approval-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 29px; padding: 0 9px; border-radius: 6px; font-size: 9px; font-weight: 650; }
+.drawing-approve-button { color: #fff; background: #d95159; border: 1px solid #d95159; }
+.drawing-approve-button:hover { background: #bd4049; }
+.drawing-reject-button { color: #77798b; background: #fff; border: 1px solid #e8e5e8; }
+.drawing-approval-status { display: block; color: #648775; font-size: 9px; }
+.drawing-approval-status.rejected { color: #9293a0; }
+@media (max-width: 520px) {
+  .welcome-flow { padding: 20px 14px; }
+  .welcome-flow-card { padding: 28px 23px 22px; border-radius: 15px; }
+}
 
 .main-area { display: flex; flex: 1; flex-direction: column; width: calc(100% - 264px); min-width: 0; height: 100vh; height: 100dvh; margin-left: 264px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 60px; flex: 0 0 60px; padding: 0 30px; background: #fff; border-bottom: 1px solid #f0e7e5; }
@@ -220,7 +270,7 @@ button:disabled { cursor: not-allowed; }
   .profile-heading { grid-column: 1 / -1; margin-bottom: 7px; }
   .profile-row { min-width: 0; }
   .profile-row > .avatar { display: none; }
-  .save-profile-button { width: 100px; margin: 0; }
+  .edit-profile-button { width: 100px; margin: 0; }
   .main-area { width: 100%; height: auto; min-height: 58dvh; margin-left: 0; }
   .topbar { height: 48px; flex-basis: 48px; padding: 0 15px; }
   .workspace { min-height: 0; padding: 14px 14px 8px; }

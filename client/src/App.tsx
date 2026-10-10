@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Sparkles, Square, Trash2, Type, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Sparkles, Square, Trash2, Type, Users, X } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
 import { useSocket, type ChatMessage, type ChatPoll, type GuestUser, type RoomUser } from './hooks/useSocket';
 import { askLocalAssistant } from './services/assistant';
+import type { ProposedDrawing } from './services/assistant';
 import type { Room } from './services/rooms';
-import { useCanvasStore } from './store/canvasStore';
+import { useCanvasStore, type Shape } from './store/canvasStore';
 
 const makeGuest = (): GuestUser => {
   const id = localStorage.getItem('syncboard-user-id') || crypto.randomUUID();
@@ -34,6 +35,94 @@ function Avatar({ name, color, size = 'normal' }: { name: string; color: string;
   );
 }
 
+function WelcomeFlow({
+  step,
+  displayName,
+  onDisplayNameChange,
+  onStart,
+  onBack,
+  onNext,
+}: {
+  step: number;
+  displayName: string;
+  onDisplayNameChange: (name: string) => void;
+  onStart: (event: FormEvent<HTMLFormElement>) => void;
+  onBack: () => void;
+  onNext: () => void;
+}) {
+  const pages = [
+    {
+      eyebrow: 'A SHARED SPACE FOR IDEAS',
+      title: 'Welcome to SyncBoard',
+      description: 'A calm place to think together. Start by choosing the name your collaborators will see.',
+      icon: <Pencil size={26} />,
+    },
+    {
+      eyebrow: 'STEP 1 OF 3',
+      title: 'Create or join a room',
+      description: 'Rooms keep each team’s drawings and conversations together. Create a room for a new idea, or open one from your workspace list.',
+      icon: <Users size={26} />,
+    },
+    {
+      eyebrow: 'STEP 2 OF 3',
+      title: 'Make ideas visible',
+      description: 'Draw with the pen, shapes, arrows, and highlighter, or add labels with Text. Your work is shared live and saved to its room.',
+      icon: <Pencil size={26} />,
+    },
+    {
+      eyebrow: 'STEP 3 OF 3',
+      title: 'Think together',
+      description: 'Use chat to discuss, create polls to decide, or switch on the private AI assistant. If it suggests a board drawing, you approve it in chat before it appears.',
+      icon: <MessageCircle size={26} />,
+    },
+  ];
+  const page = pages[step];
+
+  return (
+    <main className="welcome-flow">
+      <div className="welcome-flow-brand"><span className="brand-mark"><Pencil size={18} /></span> syncboard</div>
+      <section className="welcome-flow-card" aria-labelledby="welcome-flow-title">
+        <div className="welcome-flow-icon">{page.icon}</div>
+        <span className="eyebrow">{page.eyebrow}</span>
+        <h1 id="welcome-flow-title">{page.title}</h1>
+        <p>{page.description}</p>
+        {step === 0 ? (
+          <form className="welcome-name-form" onSubmit={onStart}>
+            <label htmlFor="welcome-display-name">Your display name</label>
+            <input
+              autoFocus
+              id="welcome-display-name"
+              value={displayName}
+              onChange={(event) => onDisplayNameChange(event.target.value)}
+              placeholder="e.g. Alex"
+              maxLength={32}
+              required
+            />
+            <button className="welcome-primary-button" type="submit" disabled={!displayName.trim()}>
+              Continue <ArrowUpRight size={16} />
+            </button>
+          </form>
+        ) : (
+          <>
+            <div className="welcome-flow-progress" aria-label={`Introduction page ${step} of 3`}>
+              {pages.slice(1).map((item, index) => (
+                <span key={item.eyebrow} className={index + 1 <= step ? 'welcome-progress-active' : ''} />
+              ))}
+            </div>
+            <div className="welcome-flow-actions">
+              <button className="welcome-back-button" type="button" onClick={onBack}><ArrowLeft size={15} /> Back</button>
+              <button className="welcome-primary-button" type="button" onClick={onNext}>
+                {step === pages.length - 1 ? 'Start creating' : 'Next'} <ArrowUpRight size={16} />
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+      <span className="welcome-flow-footer">Your space to think together</span>
+    </main>
+  );
+}
+
 function RoomWorkspace({
   room,
   user,
@@ -53,14 +142,21 @@ function RoomWorkspace({
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [assistantMode, setAssistantMode] = useState(false);
-  const [assistantMessages, setAssistantMessages] = useState<{ id: string; question: string; answer: string }[]>([]);
+  const [assistantMessages, setAssistantMessages] = useState<{
+    id: string;
+    question: string;
+    answer: string;
+    drawing: ProposedDrawing | null;
+    drawingStatus: 'pending' | 'approved' | 'rejected' | 'failed';
+  }[]>([]);
   const [assistantError, setAssistantError] = useState('');
   const [isAskingAssistant, setIsAskingAssistant] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const currentTool = useCanvasStore((state) => state.currentTool);
   const setTool = useCanvasStore((state) => state.setTool);
-  const currentColor = useCanvasStore((state) => state.currentColor);
   const setColor = useCanvasStore((state) => state.set_color);
+  const currentColor = useCanvasStore((state) => state.currentColor);
   const {
     isConnected,
     presence,
@@ -101,7 +197,7 @@ function RoomWorkspace({
         const answer = await askLocalAssistant(room.id, body);
         setAssistantMessages((current) => [
           ...current,
-          { id: crypto.randomUUID(), question: body, answer },
+          { id: crypto.randomUUID(), question: body, answer: answer.answer, drawing: answer.drawing, drawingStatus: 'pending' },
         ]);
       } catch (error) {
         setAssistantError(error instanceof Error ? error.message : 'The local assistant could not answer right now.');
@@ -112,6 +208,59 @@ function RoomWorkspace({
     }
     sendMessage(body);
     setMessageDraft('');
+  };
+
+  const handleCanvasSizeChange = useCallback((size: { width: number; height: number }) => {
+    setCanvasSize((current) => (
+      current.width === size.width && current.height === size.height ? current : size
+    ));
+  }, []);
+
+  const approveDrawing = (assistantMessageId: string) => {
+    const item = assistantMessages.find((message) => message.id === assistantMessageId);
+    if (!item?.drawing || item.drawingStatus !== 'pending') return;
+    if (!isConnected || !canvasSize.width || !canvasSize.height) {
+      setAssistantError('Connect to the room before adding this drawing.');
+      return;
+    }
+
+    const shapes: Shape[] = item.drawing.shapes.map((proposed) => {
+      const [[startX, startY], [endX, endY]] = proposed.points;
+      const points: [[number, number], [number, number]] = [
+        [startX * canvasSize.width, startY * canvasSize.height],
+        [endX * canvasSize.width, endY * canvasSize.height],
+      ];
+      return {
+        id: crypto.randomUUID(),
+        type: proposed.type,
+        points,
+        color: proposed.color || currentColor,
+        width: 2,
+        ...(proposed.type === 'text' ? { text: proposed.text } : {}),
+      };
+    });
+    const sentCount = shapes.reduce((count, shape) => count + Number(sendDraw(shape)), 0);
+    if (sentCount !== shapes.length) {
+      setAssistantError(sentCount
+        ? 'The connection dropped while adding the drawing. Some shapes may have been sent; check the board before trying again.'
+        : 'The drawing could not be sent. Reconnect to the room and try again.');
+      if (sentCount) {
+        setAssistantMessages((current) => current.map((message) => (
+          message.id === assistantMessageId ? { ...message, drawingStatus: 'failed' } : message
+        )));
+      }
+      return;
+    }
+    setAssistantMessages((current) => current.map((message) => (
+      message.id === assistantMessageId ? { ...message, drawingStatus: 'approved' } : message
+    )));
+    setAssistantError('');
+  };
+
+  const rejectDrawing = (assistantMessageId: string) => {
+    setAssistantMessages((current) => current.map((message) => (
+      message.id === assistantMessageId ? { ...message, drawingStatus: 'rejected' } : message
+    )));
   };
 
   const handleCreatePoll = (event: FormEvent<HTMLFormElement>) => {
@@ -191,7 +340,13 @@ function RoomWorkspace({
             <span className="toolbar-hint">{currentTool === 'line' ? 'Drag to draw a straight line' : currentTool === 'arrow' ? 'Drag to draw an arrow' : currentTool === 'ellipse' ? 'Drag to draw an ellipse' : currentTool === 'highlighter' ? 'Drag to highlight an area' : currentTool === 'text' ? 'Click anywhere to add a text label' : 'Draw together, in real time'}</span>
           </div>
           <div className="canvas-frame">
-            <Canvas userId={user.id} sendDraw={sendDraw} sendCursor={sendCursor} expanded={expanded} />
+            <Canvas
+              userId={user.id}
+              sendDraw={sendDraw}
+              sendCursor={sendCursor}
+              expanded={expanded}
+              onCanvasSizeChange={handleCanvasSizeChange}
+            />
           </div>
           {expanded && <span className="pan-hint">Hold Space and drag to move around the board</span>}
           {error && (
@@ -291,6 +446,28 @@ function RoomWorkspace({
                   <span><Sparkles size={12} /> Local assistant</span>
                   <p>{item.answer}</p>
                 </div>
+                {item.drawing && (
+                  <div className="drawing-approval">
+                    <strong>Proposed board drawing</strong>
+                    <p>{item.drawing.summary}</p>
+                    {item.drawingStatus === 'pending' ? (
+                      <div className="drawing-approval-actions">
+                        <button type="button" className="drawing-approve-button" onClick={() => approveDrawing(item.id)}>
+                          <Check size={13} /> Add to board
+                        </button>
+                        <button type="button" className="drawing-reject-button" onClick={() => rejectDrawing(item.id)}>Not now</button>
+                      </div>
+                    ) : (
+                      <span className={`drawing-approval-status ${item.drawingStatus}`}>
+                        {item.drawingStatus === 'approved'
+                          ? 'Added to the shared board'
+                          : item.drawingStatus === 'rejected'
+                            ? 'Drawing discarded'
+                            : 'Could not add the complete drawing'}
+                      </span>
+                    )}
+                  </div>
+                )}
               </article>
             ))}
             {isAskingAssistant && (
@@ -385,6 +562,16 @@ function App() {
   const { data: rooms, isLoading, isError, error, refetch, createRoom, isCreatingRoom, createRoomError, deleteRoom, isDeletingRoom } = useRooms();
   const [user, setUser] = useState<GuestUser>(makeGuest);
   const [nameDraft, setNameDraft] = useState(user.name);
+  const [onboardingStep, setOnboardingStep] = useState(() => {
+    if (!user.name) return 0;
+    if (
+      localStorage.getItem('syncboard-onboarding-started') !== 'true' ||
+      localStorage.getItem('syncboard-onboarding-complete') === 'true'
+    ) return -1;
+    const savedStep = Number(localStorage.getItem('syncboard-onboarding-step'));
+    return Number.isInteger(savedStep) && savedStep >= 0 && savedStep <= 3 ? savedStep : 1;
+  });
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [roomName, setRoomName] = useState('');
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [roomFormError, setRoomFormError] = useState('');
@@ -407,6 +594,39 @@ function App() {
     if (!name) return;
     localStorage.setItem('syncboard-user-name', name);
     setUser((current) => ({ ...current, name }));
+    setNameDraft(name);
+    setProfileDialogOpen(false);
+  };
+
+  const startOnboarding = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = nameDraft.trim().slice(0, 32);
+    if (!name) return;
+    localStorage.setItem('syncboard-user-name', name);
+    setUser((current) => ({ ...current, name }));
+    setNameDraft(name);
+    localStorage.setItem('syncboard-onboarding-started', 'true');
+    localStorage.setItem('syncboard-onboarding-step', '1');
+    setOnboardingStep(1);
+  };
+
+  const nextOnboardingStep = () => {
+    if (onboardingStep >= 3) {
+      localStorage.setItem('syncboard-onboarding-complete', 'true');
+      localStorage.removeItem('syncboard-onboarding-started');
+      localStorage.removeItem('syncboard-onboarding-step');
+      setOnboardingStep(-1);
+      return;
+    }
+    const nextStep = onboardingStep + 1;
+    localStorage.setItem('syncboard-onboarding-step', String(nextStep));
+    setOnboardingStep(nextStep);
+  };
+
+  const previousOnboardingStep = () => {
+    const previousStep = Math.max(0, onboardingStep - 1);
+    localStorage.setItem('syncboard-onboarding-step', String(previousStep));
+    setOnboardingStep(previousStep);
   };
 
   const handleCreateRoom = async (event: FormEvent<HTMLFormElement>) => {
@@ -445,6 +665,19 @@ function App() {
     setActiveRoomId(null);
     void refetch();
   };
+
+  if (onboardingStep >= 0) {
+    return (
+      <WelcomeFlow
+        step={onboardingStep}
+        displayName={nameDraft}
+        onDisplayNameChange={setNameDraft}
+        onStart={startOnboarding}
+        onBack={previousOnboardingStep}
+        onNext={nextOnboardingStep}
+      />
+    );
+  }
 
   return (
     <main className={`app-shell ${boardExpanded ? 'board-fullscreen' : ''}`}>
@@ -518,27 +751,61 @@ function App() {
           </nav>
         </div>
 
-        <form className="profile-card" onSubmit={saveName}>
+        <div className="profile-card">
           <div className="profile-heading">YOUR PROFILE</div>
           <div className="profile-row">
             <Avatar name={user.name || 'You'} color={user.color} />
             <div className="profile-fields">
-              <label htmlFor="display-name">Display name</label>
-              <input
-                id="display-name"
-                value={nameDraft}
-                onChange={(event) => setNameDraft(event.target.value)}
-                placeholder="What should we call you?"
-                maxLength={32}
-                required
-              />
+              <strong className="profile-name">{user.name}</strong>
+              <span className="profile-label">Display name</span>
             </div>
           </div>
-          <button className="save-profile-button" type="submit" disabled={!nameDraft.trim() || nameDraft.trim() === user.name}>
-            {nameDraft.trim() === user.name ? <><Check size={14} /> Name saved</> : 'Save name'}
+          <button
+            className="edit-profile-button"
+            type="button"
+            onClick={() => {
+              setNameDraft(user.name);
+              setProfileDialogOpen(true);
+            }}
+          >
+            <Pencil size={13} /> Edit profile
           </button>
-        </form>
+        </div>
       </aside>
+
+      {profileDialogOpen && (
+        <div
+          className="profile-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setProfileDialogOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setProfileDialogOpen(false);
+          }}
+        >
+          <form className="profile-dialog" onSubmit={saveName} role="dialog" aria-modal="true" aria-labelledby="profile-dialog-title">
+            <button type="button" className="profile-dialog-close" onClick={() => setProfileDialogOpen(false)} aria-label="Close profile editor"><X size={17} /></button>
+            <div className="profile-dialog-avatar"><Avatar name={user.name} color={user.color} /></div>
+            <span className="eyebrow">YOUR PROFILE</span>
+            <h2 id="profile-dialog-title">Edit your profile</h2>
+            <p>Change how your name appears to people in your rooms.</p>
+            <label htmlFor="profile-display-name">Display name</label>
+            <input
+              autoFocus
+              id="profile-display-name"
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              placeholder="What should we call you?"
+              maxLength={32}
+              required
+            />
+            <div className="profile-dialog-actions">
+              <button type="button" className="profile-dialog-cancel" onClick={() => setProfileDialogOpen(false)}>Cancel</button>
+              <button type="submit" className="profile-dialog-save" disabled={!nameDraft.trim() || nameDraft.trim() === user.name}>Save changes</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="main-area">
         <header className="topbar">
