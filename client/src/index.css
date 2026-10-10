@@ -158,6 +158,9 @@ button:disabled { cursor: not-allowed; }
 .drawing-tools button { display: grid; width: 30px; height: 30px; place-items: center; color: #737589; background: transparent; border: 0; border-radius: 7px; }
 .drawing-tools button:hover { color: #bd444c; background: #fff4f2; }
 .drawing-tools button.drawing-tool-active { color: #bd444c; background: #fff0ee; box-shadow: inset 0 0 0 1px #f1dedd; }
+.remove-selected-button { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; color: #9a8d91; background: transparent; border: 0; border-radius: 7px; }
+.remove-selected-button:hover:not(:disabled) { color: #bd4049; background: #fff0ee; }
+.remove-selected-button:disabled { opacity: .4; cursor: not-allowed; }
 .tool-select { display: flex; align-items: center; gap: 6px; padding: 6px 8px; color: #696b7e; background: #f7f7fa; border-radius: 6px; }
 .tool-select svg { color: #cf5259; }
 .tool-select select { color: #55576a; background: transparent; border: 0; outline: 0; font-size: 10px; }
@@ -170,8 +173,11 @@ button:disabled { cursor: not-allowed; }
 .canvas-surface { position: relative; width: 100%; height: 100%; min-height: 0; }
 .drawing-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 .canvas-text-mode .drawing-canvas { cursor: text; }
+.canvas-select-mode .drawing-canvas { cursor: default; }
+.canvas-select-mode .drawing-canvas:active { cursor: grabbing; }
 .canvas-text-editor { position: absolute; z-index: 1; display: flex; align-items: center; gap: 4px; max-width: min(340px, calc(100% - 20px)); transform: translateY(-50%); }
 .canvas-text-editor input { width: 230px; max-width: calc(100vw - 100px); padding: 7px 9px; color: #30292a; background: #fff; border: 1px solid #e1a4a5; border-radius: 7px; outline: 0; box-shadow: 0 4px 16px #69343518; font-size: 13px; }
+.canvas-sticky-editor input { width: 250px; background: #fff6c8; border-color: #e5d17c; }
 .canvas-text-editor button { padding: 7px 10px; color: #fff; background: #d95159; border: 0; border-radius: 7px; font-size: 11px; }
 .inline-error { align-self: flex-start; margin-top: 7px; padding: 0; color: #bd3f51; background: transparent; border: 0; font-size: 11px; }
 .inline-error span { margin-left: 6px; color: #858696; text-decoration: underline; }
@@ -232,11 +238,13 @@ button:disabled { cursor: not-allowed; }
 .poll-cancel-button { color: #747688; background: #f3f3f7; }
 .poll-submit-button { color: #fff; background: #d95159; }
 .poll-submit-button:disabled { opacity: .5; }
-.chat-polls { display: flex; flex-direction: column; gap: 10px; }
 .poll-card { padding: 11px; background: #fffaf9; border: 1px solid #f0e2e0; border-radius: 9px; }
 .poll-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
 .poll-card-heading strong { color: #45475a; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
-.poll-card-heading > span { flex: 0 0 auto; color: #a0a1ae; font-size: 8px; }
+.poll-heading-meta { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 6px; color: #a0a1ae; font-size: 8px; }
+.poll-heading-meta time { white-space: nowrap; }
+.poll-heading-meta button { display: grid; width: 22px; height: 22px; place-items: center; color: #9a8d91; background: transparent; border: 0; border-radius: 5px; }
+.poll-heading-meta button:hover { color: #bd4049; background: #fff0ee; }
 .poll-options { display: flex; flex-direction: column; gap: 5px; }
 .poll-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 31px; overflow: hidden; padding: 0 8px; color: #666879; background: #fff; border: 1px solid #eae8ec; border-radius: 6px; text-align: left; }
 .poll-option:hover { border-color: #e3b4b3; }
@@ -247,6 +255,7 @@ button:disabled { cursor: not-allowed; }
 .poll-option-selected .poll-option-label { font-weight: 700; }
 .poll-creator { display: block; margin-top: 7px; color: #a0a1ae; font-size: 8px; }
 .assistant-thread { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.assistant-thread-date { color: #a0a1ae; font-size: 8px; }
 .assistant-question { max-width: 88%; margin: 0; padding: 8px 10px; color: #514967; background: #f4effa; border-radius: 9px 9px 2px 9px; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .assistant-answer { width: 100%; padding: 9px 10px; background: #faf8fd; border: 1px solid #ede7f4; border-radius: 9px; }
 .assistant-answer > span { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; color: #80699e; font-size: 8px; font-weight: 700; }
@@ -361,7 +370,7 @@ button:disabled { cursor: not-allowed; }
 }
 .board-expand-button:hover { background: #fff0ee; }
 .canvas-scroll-viewport { width: 100%; height: 100%; overflow: auto; overscroll-behavior: contain; }
-.canvas-surface { min-width: 100%; min-height: 100%; }
+.canvas-surface { position: relative; min-width: 100%; min-height: 100%; }
 .canvas-space-held { cursor: grab; }
 .canvas-is-panning { cursor: grabbing; user-select: none; }
 .canvas-is-panning .drawing-canvas { cursor: grabbing; }

@@ -4,6 +4,7 @@ import { pool } from '../db.js';
 const router = express.Router();
 const modelUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 const modelName = process.env.OLLAMA_MODEL || 'qwen2.5:0.5b';
+const modelApiKey = process.env.OLLAMA_API_KEY?.trim();
 const drawingTypes = new Set(['line', 'rect', 'ellipse', 'arrow', 'text']);
 const drawingFormat = {
   type: 'object',
@@ -93,7 +94,10 @@ router.post('/:roomId/assistant', async (req, res) => {
 
     const response = await fetch(new URL('/api/chat', modelUrl), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(modelApiKey ? { Authorization: `Bearer ${modelApiKey}` } : {}),
+      },
       signal: AbortSignal.timeout(90_000),
       body: JSON.stringify({
         model: modelName,
@@ -111,6 +115,12 @@ router.post('/:roomId/assistant', async (req, res) => {
     });
     if (!response.ok) {
       console.error(`Local AI model returned HTTP ${response.status}.`);
+      if (response.status === 401 || response.status === 403) {
+        return res.status(503).json({ error: 'The Ollama service rejected its credentials. Check OLLAMA_API_KEY in the API server environment.' });
+      }
+      if (response.status === 404) {
+        return res.status(503).json({ error: `The ${modelName} model is not installed in Ollama yet. Start the local AI profile and wait for its model download to finish.` });
+      }
       return res.status(503).json({ error: 'The local AI model is unavailable. Try again shortly.' });
     }
 
@@ -142,7 +152,9 @@ router.post('/:roomId/assistant', async (req, res) => {
       return res.status(504).json({ error: 'The local AI model took too long to respond. Please try again.' });
     }
     console.error('Local AI request failed:', error);
-    return res.status(503).json({ error: 'The local AI model is unavailable. Start the local model service and try again.' });
+    return res.status(503).json({
+      error: 'Ollama is not reachable. For local Docker, run `docker compose --profile local-ai up -d` and wait for the model download. For a hosted API, configure OLLAMA_BASE_URL to a private Ollama service and keep any service key in the API server environment.',
+    });
   }
 });
 

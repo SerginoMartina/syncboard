@@ -186,9 +186,9 @@ io.on('connection', (socket) => {
 
   socket.on('draw', async (shape) => {
     const roomId = socket.data.roomId;
-    const textShape = shape?.type === 'text';
+    const textShape = shape?.type === 'text' || shape?.type === 'sticky';
     if (!roomId || typeof shape?.id !== 'string' ||
-        !['line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text'].includes(shape.type) ||
+        !['line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text', 'sticky'].includes(shape.type) ||
         !Array.isArray(shape.points) ||
         !shape.points.every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) ||
         !colorIsValid(shape.color) || !Number.isFinite(shape.width) || shape.width <= 0 ||
@@ -211,6 +211,65 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Failed to save drawing:', error);
       socket.emit('action_error', 'Could not save that drawing.');
+    }
+  });
+
+  socket.on('move_shape', async (request, acknowledge = () => {}) => {
+    const roomId = socket.data.roomId;
+    const shapeId = typeof request?.shapeId === 'string' ? request.shapeId : '';
+    const points = request?.points;
+    if (!roomId || !shapeId || !Array.isArray(points) || !points.length || points.length > 20000 ||
+        !points.every((point) => Array.isArray(point) && point.length === 2 &&
+          point.every((coordinate) => Number.isFinite(coordinate) && Math.abs(coordinate) <= 100000))) {
+      acknowledge({ ok: false, error: 'Could not move that board item.' });
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `UPDATE syncboard.canvas_shapes
+         SET points = $3::jsonb
+         WHERE room_id = $1 AND id = $2
+         RETURNING id, type, points, color, width, text_content AS text,
+                   created_at AS "createdAt"`,
+        [roomId, shapeId, JSON.stringify(points)],
+      );
+      if (!rows.length) {
+        acknowledge({ ok: false, error: 'That board item no longer exists.' });
+        return;
+      }
+      io.to(roomId).emit('shape_updated', { roomId, shape: rows[0] });
+      acknowledge({ ok: true });
+    } catch (error) {
+      console.error('Failed to move board item:', error);
+      acknowledge({ ok: false, error: 'Could not move that board item. Please try again.' });
+    }
+  });
+
+  socket.on('delete_shape', async (request, acknowledge = () => {}) => {
+    const roomId = socket.data.roomId;
+    const shapeId = typeof request?.shapeId === 'string' ? request.shapeId : '';
+    if (!roomId || !shapeId) {
+      acknowledge({ ok: false, error: 'Could not remove that board item.' });
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `DELETE FROM syncboard.canvas_shapes
+         WHERE room_id = $1 AND id = $2
+         RETURNING id`,
+        [roomId, shapeId],
+      );
+      if (!rows.length) {
+        acknowledge({ ok: false, error: 'That board item no longer exists.' });
+        return;
+      }
+      io.to(roomId).emit('shape_deleted', { roomId, shapeId });
+      acknowledge({ ok: true });
+    } catch (error) {
+      console.error('Failed to remove board item:', error);
+      acknowledge({ ok: false, error: 'Could not remove that board item. Please try again.' });
     }
   });
 
@@ -408,12 +467,41 @@ io.on('connection', (socket) => {
         voterId: user.userId,
         selectedOptionId: optionId,
       });
+
     } catch (error) {
       if (client && transactionOpen) await client.query('ROLLBACK');
       console.error('Failed to submit poll vote:', error);
       socket.emit('action_error', 'Could not submit your vote. Please try again.');
     } finally {
       client?.release();
+    }
+  });
+
+  socket.on('delete_poll', async (request, acknowledge = () => {}) => {
+    const roomId = socket.data.roomId;
+    const user = activeUsers.get(socket.id);
+    const pollId = typeof request?.pollId === 'string' ? request.pollId : '';
+    if (!roomId || !user || !pollId) {
+      acknowledge({ ok: false, error: 'Could not remove that poll.' });
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `DELETE FROM syncboard.chat_polls
+         WHERE id = $1 AND room_id = $2 AND user_id = $3
+         RETURNING id`,
+        [pollId, roomId, user.userId],
+      );
+      if (!rows.length) {
+        acknowledge({ ok: false, error: 'Poll not found or you cannot remove it.' });
+        return;
+      }
+      io.to(roomId).emit('chat_poll_deleted', { roomId, pollId });
+      acknowledge({ ok: true });
+    } catch (error) {
+      console.error('Failed to delete chat poll:', error);
+      acknowledge({ ok: false, error: 'Could not remove your poll. Please try again.' });
     }
   });
 

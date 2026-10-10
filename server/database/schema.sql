@@ -29,7 +29,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS profiles_display_name_unique_idx
 CREATE TABLE IF NOT EXISTS syncboard.canvas_shapes (
     room_id text NOT NULL REFERENCES syncboard.rooms (id) ON DELETE CASCADE,
     id text NOT NULL,
-    type text NOT NULL CHECK (type IN ('line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text')),
+    type text NOT NULL CHECK (type IN ('line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text', 'sticky')),
     points jsonb NOT NULL CHECK (jsonb_typeof(points) = 'array'),
     color text NOT NULL CHECK (length(btrim(color)) > 0),
     width double precision NOT NULL CHECK (width > 0),
@@ -49,27 +49,31 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint
-        WHERE conname = 'canvas_shapes_type_allowed_v2'
+        WHERE conname = 'canvas_shapes_type_allowed_v3'
           AND conrelid = 'syncboard.canvas_shapes'::regclass
     ) THEN
         ALTER TABLE syncboard.canvas_shapes
+            DROP CONSTRAINT IF EXISTS canvas_shapes_type_allowed_v2;
+        ALTER TABLE syncboard.canvas_shapes
             DROP CONSTRAINT IF EXISTS canvas_shapes_type_allowed;
         ALTER TABLE syncboard.canvas_shapes
-            ADD CONSTRAINT canvas_shapes_type_allowed_v2
-            CHECK (type IN ('line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text'));
+            ADD CONSTRAINT canvas_shapes_type_allowed_v3
+            CHECK (type IN ('line', 'rect', 'ellipse', 'arrow', 'freehand', 'highlighter', 'text', 'sticky'));
     END IF;
 
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint
-        WHERE conname = 'canvas_shapes_text_content_required'
+        WHERE conname = 'canvas_shapes_text_content_required_v2'
           AND conrelid = 'syncboard.canvas_shapes'::regclass
     ) THEN
         ALTER TABLE syncboard.canvas_shapes
-            ADD CONSTRAINT canvas_shapes_text_content_required
+            DROP CONSTRAINT IF EXISTS canvas_shapes_text_content_required;
+        ALTER TABLE syncboard.canvas_shapes
+            ADD CONSTRAINT canvas_shapes_text_content_required_v2
             CHECK (
-                (type = 'text' AND text_content IS NOT NULL AND length(btrim(text_content)) > 0)
-                OR (type <> 'text' AND text_content IS NULL)
+                (type IN ('text', 'sticky') AND text_content IS NOT NULL AND length(btrim(text_content)) > 0)
+                OR (type NOT IN ('text', 'sticky') AND text_content IS NULL)
             );
     END IF;
 END $$;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Sparkles, Square, Trash2, Type, Users, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, MousePointer2, Pencil, Plus, Radio, RefreshCw, Sparkles, Square, StickyNote, Trash2, Type, Users, X } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
 import { useSocket, type ChatMessage, type ChatPoll, type GuestUser, type RoomUser } from './hooks/useSocket';
@@ -23,6 +23,12 @@ const makeGuest = (): GuestUser => {
 };
 
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
+const formatChatDate = (date: string) => new Date(date).toLocaleString([], {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+});
 
 function Avatar({ name, color, avatarUrl, size = 'normal' }: {
   name: string;
@@ -180,6 +186,7 @@ function RoomWorkspace({
   const [messageDraft, setMessageDraft] = useState('');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editedMessageDraft, setEditedMessageDraft] = useState('');
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const [pollComposerOpen, setPollComposerOpen] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
@@ -187,6 +194,7 @@ function RoomWorkspace({
   const [assistantMode, setAssistantMode] = useState(false);
   const [assistantMessages, setAssistantMessages] = useState<{
     id: string;
+    createdAt: string;
     question: string;
     answer: string;
     drawing: ProposedDrawing | null;
@@ -209,10 +217,13 @@ function RoomWorkspace({
     roomDeleted,
     clearError,
     sendDraw,
+    updateShape,
+    deleteShape,
     sendCursor,
     sendMessage,
     editMessage,
     deleteMessage,
+    deletePoll,
     createPoll,
     votePoll,
   } = useSocket(room.id, user);
@@ -224,7 +235,13 @@ function RoomWorkspace({
   useEffect(() => {
     setAssistantMessages([]);
     setAssistantError('');
+    setSelectedShapeId(null);
   }, [room.id]);
+
+  const handleDeleteSelectedShape = async () => {
+    if (!selectedShapeId) return;
+    if (await deleteShape(selectedShapeId)) setSelectedShapeId(null);
+  };
 
   useEffect(() => {
     if (roomDeleted) onExit();
@@ -242,7 +259,7 @@ function RoomWorkspace({
         const answer = await askLocalAssistant(room.id, body);
         setAssistantMessages((current) => [
           ...current,
-          { id: crypto.randomUUID(), question: body, answer: answer.answer, drawing: answer.drawing, drawingStatus: 'pending' },
+          { id: crypto.randomUUID(), createdAt: new Date().toISOString(), question: body, answer: answer.answer, drawing: answer.drawing, drawingStatus: 'pending' },
         ]);
       } catch (error) {
         setAssistantError(error instanceof Error ? error.message : 'The local assistant could not answer right now.');
@@ -271,6 +288,11 @@ function RoomWorkspace({
       setEditingMessageId(null);
       setEditedMessageDraft('');
     }
+  };
+
+  const handleDeletePoll = async (pollId: string) => {
+    if (!window.confirm('Remove this poll and its votes from the room?')) return;
+    await deletePoll(pollId);
   };
 
   const handleCanvasSizeChange = useCallback((size: { width: number; height: number }) => {
@@ -337,6 +359,27 @@ function RoomWorkspace({
     setPollComposerOpen(false);
   };
 
+  const timelineItems = [
+    ...messages.map((message) => ({
+      id: message.id,
+      createdAt: message.createdAt,
+      kind: 'message' as const,
+      message,
+    })),
+    ...polls.map((poll) => ({
+      id: poll.id,
+      createdAt: poll.createdAt,
+      kind: 'poll' as const,
+      poll,
+    })),
+    ...assistantMessages.map((assistant) => ({
+      id: assistant.id,
+      createdAt: assistant.createdAt,
+      kind: 'assistant' as const,
+      assistant,
+    })),
+  ].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+
   return (
     <section className="workspace" aria-label={`Room ${room.name}`}>
       <div className="room-heading">
@@ -373,6 +416,7 @@ function RoomWorkspace({
         <div className="canvas-column">
           <div className="canvas-toolbar">
             <div className="drawing-tools" role="toolbar" aria-label="Drawing tools">
+              <button type="button" className={currentTool === 'select' ? 'drawing-tool-active' : ''} onClick={() => setTool('select')} aria-label="Select and move" title="Select and move" aria-pressed={currentTool === 'select'}><MousePointer2 size={16} /></button>
               <button type="button" className={currentTool === 'freehand' ? 'drawing-tool-active' : ''} onClick={() => setTool('freehand')} aria-label="Pen" title="Pen" aria-pressed={currentTool === 'freehand'}><Pencil size={16} /></button>
               <button type="button" className={currentTool === 'line' ? 'drawing-tool-active' : ''} onClick={() => setTool('line')} aria-label="Line" title="Line" aria-pressed={currentTool === 'line'}><Minus size={16} /></button>
               <button type="button" className={currentTool === 'rect' ? 'drawing-tool-active' : ''} onClick={() => setTool('rect')} aria-label="Rectangle" title="Rectangle" aria-pressed={currentTool === 'rect'}><Square size={16} /></button>
@@ -380,7 +424,16 @@ function RoomWorkspace({
               <button type="button" className={currentTool === 'arrow' ? 'drawing-tool-active' : ''} onClick={() => setTool('arrow')} aria-label="Arrow" title="Arrow" aria-pressed={currentTool === 'arrow'}><ArrowUpRight size={16} /></button>
               <button type="button" className={currentTool === 'highlighter' ? 'drawing-tool-active' : ''} onClick={() => setTool('highlighter')} aria-label="Highlighter" title="Highlighter" aria-pressed={currentTool === 'highlighter'}><Highlighter size={16} /></button>
               <button type="button" className={currentTool === 'text' ? 'drawing-tool-active' : ''} onClick={() => setTool('text')} aria-label="Text" title="Text" aria-pressed={currentTool === 'text'}><Type size={16} /></button>
+              <button type="button" className={currentTool === 'sticky' ? 'drawing-tool-active' : ''} onClick={() => setTool('sticky')} aria-label="Post-it note" title="Post-it note" aria-pressed={currentTool === 'sticky'}><StickyNote size={16} /></button>
             </div>
+            <button
+              type="button"
+              className="remove-selected-button"
+              onClick={() => void handleDeleteSelectedShape()}
+              disabled={!selectedShapeId}
+              aria-label="Remove selected board item"
+              title={selectedShapeId ? 'Remove selected item (Delete)' : 'Select an item to remove it'}
+            ><Trash2 size={15} /></button>
             <label className="color-control" title="Choose drawing color">
               <input
                 type="color"
@@ -400,12 +453,16 @@ function RoomWorkspace({
               {expanded ? <Minimize2 size={15} /> : <Expand size={15} />}
               <span>{expanded ? 'Minimize' : 'Full screen'}</span>
             </button>
-            <span className="toolbar-hint">{currentTool === 'line' ? 'Drag to draw a straight line' : currentTool === 'arrow' ? 'Drag to draw an arrow' : currentTool === 'ellipse' ? 'Drag to draw an ellipse' : currentTool === 'highlighter' ? 'Drag to highlight an area' : currentTool === 'text' ? 'Click anywhere to add a text label' : 'Draw together, in real time'}</span>
+            <span className="toolbar-hint">{currentTool === 'select' ? 'Select and drag an item · Delete removes it' : currentTool === 'line' ? 'Drag to draw a straight line' : currentTool === 'arrow' ? 'Drag to draw an arrow' : currentTool === 'ellipse' ? 'Drag to draw an ellipse' : currentTool === 'highlighter' ? 'Drag to highlight an area' : currentTool === 'text' ? 'Click anywhere to add a text label' : currentTool === 'sticky' ? 'Click the board to place a post-it note' : 'Draw together, in real time'}</span>
           </div>
           <div className="canvas-frame">
             <Canvas
               userId={user.id}
               sendDraw={sendDraw}
+              moveShape={updateShape}
+              deleteShape={deleteShape}
+              selectedShapeId={selectedShapeId}
+              onSelectedShapeChange={setSelectedShapeId}
               sendCursor={sendCursor}
               expanded={expanded}
               onCanvasSizeChange={handleCanvasSizeChange}
@@ -466,99 +523,100 @@ function RoomWorkspace({
             </form>
           )}
           <div className="chat-messages" aria-live="polite">
-            {polls.length > 0 && (
-              <div className="chat-polls" aria-label="Room polls">
-                {polls.map((poll: ChatPoll) => {
-                  const totalVotes = poll.options.reduce((total, option) => total + option.votes, 0);
-                  return (
-                    <article className="poll-card" key={poll.id}>
-                      <div className="poll-card-heading">
-                        <strong>{poll.question}</strong>
-                        <span>{totalVotes} {totalVotes === 1 ? 'vote' : 'votes'}</span>
-                      </div>
-                      <div className="poll-options">
-                        {poll.options.map((option) => {
-                          const percent = totalVotes ? Math.round((option.votes / totalVotes) * 100) : 0;
-                          const selected = poll.selectedOptionId === option.id;
-                          return (
-                            <button
-                              className={`poll-option ${selected ? 'poll-option-selected' : ''}`}
-                              key={option.id}
-                              type="button"
-                              onClick={() => votePoll(poll.id, option.id)}
-                              aria-pressed={selected}
-                              title={selected ? 'Your vote — click another option to change it' : 'Vote for this option'}
-                            >
-                              <span className="poll-option-progress" style={{ width: `${percent}%` }} />
-                              <span className="poll-option-label">{option.text}</span>
-                              <span className="poll-option-percent">{percent}%</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <span className="poll-creator">Poll by {poll.creatorName}{poll.selectedOptionId ? ' · Your vote is in' : ''}</span>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-            {assistantMessages.map((item) => (
-              <article className="assistant-thread" key={item.id}>
-                <p className="assistant-question">{item.question}</p>
-                <div className="assistant-answer">
-                  <span><Sparkles size={12} /> Local assistant</span>
-                  <p>{item.answer}</p>
-                </div>
-                {item.drawing && (
-                  <div className="drawing-approval">
-                    <strong>Proposed board drawing</strong>
-                    <p>{item.drawing.summary}</p>
-                    {item.drawingStatus === 'pending' ? (
-                      <div className="drawing-approval-actions">
-                        <button type="button" className="drawing-approve-button" onClick={() => approveDrawing(item.id)}>
-                          <Check size={13} /> Add to board
-                        </button>
-                        <button type="button" className="drawing-reject-button" onClick={() => rejectDrawing(item.id)}>Not now</button>
-                      </div>
-                    ) : (
-                      <span className={`drawing-approval-status ${item.drawingStatus}`}>
-                        {item.drawingStatus === 'approved'
-                          ? 'Added to the shared board'
-                          : item.drawingStatus === 'rejected'
-                            ? 'Drawing discarded'
-                            : 'Could not add the complete drawing'}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </article>
-            ))}
-            {isAskingAssistant && (
-              <div className="assistant-thinking" role="status"><Sparkles size={14} /> Thinking with the local model…</div>
-            )}
-            {assistantError && (
-              <div className="assistant-error" role="alert">
-                {assistantError}
-                <button type="button" onClick={() => setAssistantError('')} aria-label="Dismiss assistant error"><X size={13} /></button>
-              </div>
-            )}
-            {messages.length === 0 && polls.length === 0 && assistantMessages.length === 0 && !isAskingAssistant ? (
+            {timelineItems.length === 0 && !isAskingAssistant ? (
               <div className="chat-empty">
                 <span className="chat-empty-icon"><MessageCircle size={19} /></span>
                 <strong>Start the conversation</strong>
                 <span>Messages are saved in this room.</span>
               </div>
-            ) : messages.map((message: ChatMessage) => {
+            ) : timelineItems.map((timelineItem) => {
+              if (timelineItem.kind === 'poll') {
+                const poll = timelineItem.poll;
+                const totalVotes = poll.options.reduce((total, option) => total + option.votes, 0);
+                return (
+                  <article className="poll-card" key={`poll-${poll.id}`}>
+                    <div className="poll-card-heading">
+                      <strong>{poll.question}</strong>
+                      <div className="poll-heading-meta">
+                        <span>{totalVotes} {totalVotes === 1 ? 'vote' : 'votes'}</span>
+                        <time dateTime={poll.createdAt}>{formatChatDate(poll.createdAt)}</time>
+                        {poll.creatorId === user.id && (
+                          <button type="button" onClick={() => void handleDeletePoll(poll.id)} aria-label="Delete poll" title="Delete poll">
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="poll-options">
+                      {poll.options.map((option) => {
+                        const percent = totalVotes ? Math.round((option.votes / totalVotes) * 100) : 0;
+                        const selected = poll.selectedOptionId === option.id;
+                        return (
+                          <button
+                            className={`poll-option ${selected ? 'poll-option-selected' : ''}`}
+                            key={option.id}
+                            type="button"
+                            onClick={() => votePoll(poll.id, option.id)}
+                            aria-pressed={selected}
+                            title={selected ? 'Your vote — click another option to change it' : 'Vote for this option'}
+                          >
+                            <span className="poll-option-progress" style={{ width: `${percent}%` }} />
+                            <span className="poll-option-label">{option.text}</span>
+                            <span className="poll-option-percent">{percent}%</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="poll-creator">Poll by {poll.creatorName}{poll.selectedOptionId ? ' · Your vote is in' : ''}</span>
+                  </article>
+                );
+              }
+
+              if (timelineItem.kind === 'assistant') {
+                const item = timelineItem.assistant;
+                return (
+                  <article className="assistant-thread" key={`assistant-${item.id}`}>
+                    <time className="assistant-thread-date" dateTime={item.createdAt}>{formatChatDate(item.createdAt)}</time>
+                    <p className="assistant-question">{item.question}</p>
+                    <div className="assistant-answer">
+                      <span><Sparkles size={12} /> Local assistant</span>
+                      <p>{item.answer}</p>
+                    </div>
+                    {item.drawing && (
+                      <div className="drawing-approval">
+                        <strong>Proposed board drawing</strong>
+                        <p>{item.drawing.summary}</p>
+                        {item.drawingStatus === 'pending' ? (
+                          <div className="drawing-approval-actions">
+                            <button type="button" className="drawing-approve-button" onClick={() => approveDrawing(item.id)}>
+                              <Check size={13} /> Add to board
+                            </button>
+                            <button type="button" className="drawing-reject-button" onClick={() => rejectDrawing(item.id)}>Not now</button>
+                          </div>
+                        ) : (
+                          <span className={`drawing-approval-status ${item.drawingStatus}`}>
+                            {item.drawingStatus === 'approved'
+                              ? 'Added to the shared board'
+                              : item.drawingStatus === 'rejected'
+                                ? 'Drawing discarded'
+                                : 'Could not add the complete drawing'}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </article>
+                );
+              }
+
+              const message = timelineItem.message;
               const ownMessage = message.userId === user.id;
               return (
-                <article className={`chat-message ${ownMessage ? 'message-own' : ''}`} key={message.id}>
+                <article className={`chat-message ${ownMessage ? 'message-own' : ''}`} key={`message-${message.id}`}>
                   <Avatar name={message.name} color={message.color} avatarUrl={message.avatarUrl} size="small" />
                   <div className="message-content">
                     <div className="message-meta">
                       <strong>{message.name}</strong>
-                      <time dateTime={message.createdAt}>
-                        {new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                      </time>
+                      <time dateTime={message.createdAt}>{formatChatDate(message.createdAt)}</time>
                       {message.editedAt && <span className="message-edited-label">edited</span>}
                     </div>
                     {editingMessageId === message.id ? (
@@ -602,6 +660,15 @@ function RoomWorkspace({
                 </article>
               );
             })}
+            {isAskingAssistant && (
+              <div className="assistant-thinking" role="status"><Sparkles size={14} /> Thinking with the local model…</div>
+            )}
+            {assistantError && (
+              <div className="assistant-error" role="alert">
+                {assistantError}
+                <button type="button" onClick={() => setAssistantError('')} aria-label="Dismiss assistant error"><X size={13} /></button>
+              </div>
+            )}
             <div ref={endOfMessagesRef} />
           </div>
           <form className={`chat-composer ${assistantMode ? 'assistant-mode' : ''}`} onSubmit={(event) => void handleSendMessage(event)}>

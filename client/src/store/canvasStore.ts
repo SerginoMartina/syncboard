@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 
-export type CanvasTool = 'line' | 'rect' | 'ellipse' | 'arrow' | 'freehand' | 'highlighter' | 'text';
+export type ShapeType = 'line' | 'rect' | 'ellipse' | 'arrow' | 'freehand' | 'highlighter' | 'text' | 'sticky';
+export type CanvasTool = ShapeType | 'select';
 
 export type Shape = {
   id: string;
-  type: CanvasTool;
+  type: ShapeType;
   points: [number, number][];
   color: string;
   width: number;
@@ -28,6 +29,8 @@ export interface CanvasState {
   setTool: (tool: CanvasTool) => void;
   set_color: (color: string) => void;
   addShape: (shape: Shape) => void;
+  updateShape: (shape: Shape) => void;
+  removeShape: (shapeId: string) => void;
   setShapes: (shapes: Shape[]) => void;
   updateRemoteCursor: (cursor: Cursor) => void;
   setRemoteCursors: (cursors: Record<string, Cursor>) => void;
@@ -48,6 +51,12 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     shapes: state.shapes.some((existing) => existing.id === shape.id)
       ? state.shapes
       : [...state.shapes, shape],
+  })),
+  updateShape: (shape) => set((state) => ({
+    shapes: state.shapes.map((existing) => existing.id === shape.id ? shape : existing),
+  })),
+  removeShape: (shapeId) => set((state) => ({
+    shapes: state.shapes.filter((shape) => shape.id !== shapeId),
   })),
   setShapes: (shapes) => set({ shapes }),
 

@@ -23,6 +23,8 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 - **Room Isolation:** Drawings and chat are sent only to collaborators connected to the selected Socket.IO room.
 - **Profiles:** Display names are reserved globally and case-insensitively in PostgreSQL. If a name is taken, SyncBoard offers an available alternative. Optional PNG, JPEG, and WebP profile images are stored in the SyncBoard schema.
 - **Chat controls:** Authors can edit or remove their own persisted messages; changes are shared live with everyone in the room.
+- **Chat timeline:** Messages, polls, and private assistant replies appear in time order with dates. Poll creators can remove their polls.
+- **Sticky notes:** Add persistent post-it notes to the shared drawing board.
 - **Board controls:** Room owners can delete rooms; expand a board for a scrollable workspace, pan with Space+drag, and press Escape to minimize. Room chat floats over the canvas and can be opened or closed without leaving the board.
 - **Private local assistant:** Use the AI button in chat to ask a question answered by a self-hosted Ollama model. Prompts go only from the browser to this app's server and the configured local model; they are not broadcast, persisted, or sent to a hosted AI provider. When asked to draw, the assistant proposes a board drawing in chat; it is added to the shared board only after a collaborator approves it.
 - **Getting started:** New users choose a display name and get a short, multi-page introduction. The name can be changed later from the profile editor.
@@ -106,11 +108,21 @@ local AI profile to run Ollama and download the model:
 ```bash
 docker compose --profile local-ai up -d --build
 ```
-The initial model download requires an internet connection; prompts and
-responses are processed by Ollama on the local Docker network. For a separately
-hosted API, configure `OLLAMA_BASE_URL` to a private, self-hosted Ollama
-endpoint and `OLLAMA_MODEL` to an installed model. Do not point it at a hosted
-inference service if prompts must remain within your application.
+The model's weights are about 398 MB; the first pull also needs an internet
+connection and additional disk space for Ollama. Check progress with
+`docker compose logs -f ollama-model`; confirm it is installed with
+`docker compose exec ollama ollama list`. The API returns a specific error when
+the service cannot be reached, the model is missing, or an endpoint rejects its
+credentials.
+
+Prompts and responses are processed by Ollama on the local Docker network. Local
+Ollama does not require an API key. If your private, separately hosted
+Ollama-compatible endpoint requires one, set `OLLAMA_BASE_URL`,
+`OLLAMA_MODEL`, and `OLLAMA_API_KEY` in the **API server's environment**. The
+key is never stored in a user profile or sent from the browser. `API_AI_XXXXXXXX`
+is only a placeholder and will not authenticate with a protected service. Do
+not point the assistant at a hosted inference service if prompts must remain
+within your application.
 
 3. **Install Frontend Dependencies:**
    ```bash

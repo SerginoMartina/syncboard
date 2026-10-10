@@ -121,6 +121,12 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     const handleDraw = (event: { roomId: string; shape: Shape }) => {
       if (event.roomId === roomId) addShape(event.shape);
     };
+    const handleShapeUpdated = (event: { roomId: string; shape: Shape }) => {
+      if (event.roomId === roomId) useCanvasStore.getState().updateShape(event.shape);
+    };
+    const handleShapeDeleted = (event: { roomId: string; shapeId: string }) => {
+      if (event.roomId === roomId) useCanvasStore.getState().removeShape(event.shapeId);
+    };
     const handleCursorMove = (event: { roomId: string; cursor: Cursor }) => {
       if (event.roomId === roomId) updateRemoteCursor(event.cursor);
     };
@@ -174,6 +180,10 @@ export const useSocket = (roomId: string, user: GuestUser) => {
           : poll
       )));
     };
+    const handlePollDeleted = (event: { roomId: string; pollId: string }) => {
+      if (event.roomId !== roomId) return;
+      setPolls((current) => current.filter((poll) => poll.id !== event.pollId));
+    };
     const handleActionError = (message: string) => setError(message);
     const handleRoomNotFound = () => setError('This room no longer exists. Refresh the room list and choose another.');
     const handleRoomDeleted = (deletedRoomId: string) => {
@@ -185,12 +195,15 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     socket.on('room_state', handleRoomState);
     socket.on('presence_update', handlePresence);
     socket.on('draw', handleDraw);
+    socket.on('shape_updated', handleShapeUpdated);
+    socket.on('shape_deleted', handleShapeDeleted);
     socket.on('cursor_move', handleCursorMove);
     socket.on('chat_message', handleMessage);
     socket.on('chat_message_updated', handleMessageUpdated);
     socket.on('chat_message_deleted', handleMessageDeleted);
     socket.on('chat_poll_created', handlePollCreated);
     socket.on('chat_poll_updated', handlePollUpdated);
+    socket.on('chat_poll_deleted', handlePollDeleted);
     socket.on('action_error', handleActionError);
     socket.on('room_not_found', handleRoomNotFound);
     socket.on('room_deleted', handleRoomDeleted);
@@ -204,12 +217,15 @@ export const useSocket = (roomId: string, user: GuestUser) => {
       socket.off('room_state', handleRoomState);
       socket.off('presence_update', handlePresence);
       socket.off('draw', handleDraw);
+      socket.off('shape_updated', handleShapeUpdated);
+      socket.off('shape_deleted', handleShapeDeleted);
       socket.off('cursor_move', handleCursorMove);
       socket.off('chat_message', handleMessage);
       socket.off('chat_message_updated', handleMessageUpdated);
       socket.off('chat_message_deleted', handleMessageDeleted);
       socket.off('chat_poll_created', handlePollCreated);
       socket.off('chat_poll_updated', handlePollUpdated);
+      socket.off('chat_poll_deleted', handlePollDeleted);
       socket.off('action_error', handleActionError);
       socket.off('room_not_found', handleRoomNotFound);
       socket.off('room_deleted', handleRoomDeleted);
@@ -228,6 +244,40 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     return true;
   }, []);
 
+  const updateShape = useCallback((shapeId: string, points: [number, number][]) => new Promise<boolean>((resolve) => {
+    if (!socket.connected) {
+      setError('Connection lost. Your change was not saved.');
+      resolve(false);
+      return;
+    }
+    socket.timeout(8000).emit('move_shape', { shapeId, points }, (timeoutError: Error | null, result: { ok?: boolean; error?: string }) => {
+      if (timeoutError || !result?.ok) {
+        setError(result?.error || 'The board item could not be moved. Please try again.');
+        resolve(false);
+        return;
+      }
+      setError('');
+      resolve(true);
+    });
+  }), []);
+
+  const deleteShape = useCallback((shapeId: string) => new Promise<boolean>((resolve) => {
+    if (!socket.connected) {
+      setError('Connection lost. Your item was not removed.');
+      resolve(false);
+      return;
+    }
+    socket.timeout(8000).emit('delete_shape', { shapeId }, (timeoutError: Error | null, result: { ok?: boolean; error?: string }) => {
+      if (timeoutError || !result?.ok) {
+        setError(result?.error || 'The board item could not be removed. Please try again.');
+        resolve(false);
+        return;
+      }
+      setError('');
+      resolve(true);
+    });
+  }), []);
+
   const sendCursor = useCallback((x: number, y: number) => {
     if (socket.connected) socket.emit('cursor_move', { x, y });
   }, []);
@@ -242,8 +292,8 @@ export const useSocket = (roomId: string, user: GuestUser) => {
   }, []);
 
   const updateChatMessage = useCallback((
-    event: 'edit_chat_message' | 'delete_chat_message',
-    request: { messageId: string; body?: string },
+    event: 'edit_chat_message' | 'delete_chat_message' | 'delete_poll',
+    request: { messageId?: string; pollId?: string; body?: string },
   ) => new Promise<boolean>((resolve) => {
     if (!socket.connected) {
       setError('Connection lost. Your chat update was not sent.');
@@ -270,6 +320,8 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     roomDeleted,
     clearError: () => setError(''),
     sendDraw,
+    updateShape,
+    deleteShape,
     sendCursor,
     sendMessage,
     editMessage: (messageId: string, body: string) => updateChatMessage(
@@ -279,6 +331,10 @@ export const useSocket = (roomId: string, user: GuestUser) => {
     deleteMessage: (messageId: string) => updateChatMessage(
       'delete_chat_message',
       { messageId },
+    ),
+    deletePoll: (pollId: string) => updateChatMessage(
+      'delete_poll',
+      { pollId },
     ),
     createPoll: (question: string, options: string[]) => {
       if (!socket.connected) {
