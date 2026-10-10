@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Square, Trash2, Type, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowUpRight, BarChart3, Check, Circle, Expand, Highlighter, Loader2, MessageCircle, Minimize2, Minus, Pencil, Plus, Radio, RefreshCw, Sparkles, Square, Trash2, Type, X } from 'lucide-react';
 import Canvas from './components/canvas/Canvas';
 import { useRooms } from './hooks/useRooms';
 import { useSocket, type ChatMessage, type ChatPoll, type GuestUser, type RoomUser } from './hooks/useSocket';
+import { askLocalAssistant } from './services/assistant';
 import type { Room } from './services/rooms';
 import { useCanvasStore } from './store/canvasStore';
 
@@ -51,6 +52,10 @@ function RoomWorkspace({
   const [pollComposerOpen, setPollComposerOpen] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
+  const [assistantMode, setAssistantMode] = useState(false);
+  const [assistantMessages, setAssistantMessages] = useState<{ id: string; question: string; answer: string }[]>([]);
+  const [assistantError, setAssistantError] = useState('');
+  const [isAskingAssistant, setIsAskingAssistant] = useState(false);
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const currentTool = useCanvasStore((state) => state.currentTool);
   const setTool = useCanvasStore((state) => state.setTool);
@@ -73,16 +78,38 @@ function RoomWorkspace({
 
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  }, [messages.length, polls.length, assistantMessages.length, isAskingAssistant]);
+
+  useEffect(() => {
+    setAssistantMessages([]);
+    setAssistantError('');
+  }, [room.id]);
 
   useEffect(() => {
     if (roomDeleted) onExit();
   }, [roomDeleted, onExit]);
 
-  const handleSendMessage = (event: FormEvent<HTMLFormElement>) => {
+  const handleSendMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const body = messageDraft.trim();
     if (!body) return;
+    if (assistantMode) {
+      setMessageDraft('');
+      setAssistantError('');
+      setIsAskingAssistant(true);
+      try {
+        const answer = await askLocalAssistant(room.id, body);
+        setAssistantMessages((current) => [
+          ...current,
+          { id: crypto.randomUUID(), question: body, answer },
+        ]);
+      } catch (error) {
+        setAssistantError(error instanceof Error ? error.message : 'The local assistant could not answer right now.');
+      } finally {
+        setIsAskingAssistant(false);
+      }
+      return;
+    }
     sendMessage(body);
     setMessageDraft('');
   };
@@ -257,7 +284,25 @@ function RoomWorkspace({
                 })}
               </div>
             )}
-            {messages.length === 0 && polls.length === 0 ? (
+            {assistantMessages.map((item) => (
+              <article className="assistant-thread" key={item.id}>
+                <p className="assistant-question">{item.question}</p>
+                <div className="assistant-answer">
+                  <span><Sparkles size={12} /> Local assistant</span>
+                  <p>{item.answer}</p>
+                </div>
+              </article>
+            ))}
+            {isAskingAssistant && (
+              <div className="assistant-thinking" role="status"><Sparkles size={14} /> Thinking with the local model…</div>
+            )}
+            {assistantError && (
+              <div className="assistant-error" role="alert">
+                {assistantError}
+                <button type="button" onClick={() => setAssistantError('')} aria-label="Dismiss assistant error"><X size={13} /></button>
+              </div>
+            )}
+            {messages.length === 0 && polls.length === 0 && assistantMessages.length === 0 && !isAskingAssistant ? (
               <div className="chat-empty">
                 <span className="chat-empty-icon"><MessageCircle size={19} /></span>
                 <strong>Start the conversation</strong>
@@ -279,7 +324,7 @@ function RoomWorkspace({
             ))}
             <div ref={endOfMessagesRef} />
           </div>
-          <form className="chat-composer" onSubmit={handleSendMessage}>
+          <form className={`chat-composer ${assistantMode ? 'assistant-mode' : ''}`} onSubmit={(event) => void handleSendMessage(event)}>
             <textarea
               value={messageDraft}
               onChange={(event) => setMessageDraft(event.target.value)}
@@ -289,23 +334,40 @@ function RoomWorkspace({
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder={`Message as ${user.name}...`}
+              placeholder={assistantMode ? 'Ask the private local assistant…' : `Message as ${user.name}...`}
               maxLength={2000}
               rows={2}
               aria-label="Write a chat message"
+              disabled={isAskingAssistant}
             />
-            <button type="submit" disabled={!messageDraft.trim()} aria-label="Send message">
-              <ArrowUp size={17} />
+            <button type="submit" disabled={!messageDraft.trim() || isAskingAssistant} aria-label={assistantMode ? 'Ask local assistant' : 'Send message'}>
+              {isAskingAssistant ? <Loader2 size={16} className="spin" /> : <ArrowUp size={17} />}
+            </button>
+            <button
+              type="button"
+              className={`assistant-mode-toggle ${assistantMode ? 'assistant-mode-toggle-active' : ''}`}
+              onClick={() => {
+                setAssistantMode((enabled) => !enabled);
+                setPollComposerOpen(false);
+                setAssistantError('');
+              }}
+              aria-pressed={assistantMode}
+              title="Ask the self-hosted local AI. Your prompt is not shared in room chat."
+            >
+              <Sparkles size={14} /> AI
             </button>
             <button
               type="button"
               className="poll-compose-trigger"
-              onClick={() => setPollComposerOpen((open) => !open)}
+              onClick={() => {
+                setAssistantMode(false);
+                setPollComposerOpen((open) => !open);
+              }}
               aria-expanded={pollComposerOpen}
             >
               <BarChart3 size={14} /> Poll
             </button>
-            <span>Enter to send · Shift + Enter for a new line</span>
+            <span>{assistantMode ? 'Private · answered by this app’s local model' : 'Enter to send · Shift + Enter for a new line'}</span>
           </form>
         </aside>}
         {!chatOpen && (

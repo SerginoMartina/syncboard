@@ -22,6 +22,7 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 - **Remote Cursors:** Real-time presence of other users' mouse positions to improve collaboration UX.
 - **Room Isolation:** Drawings and chat are sent only to collaborators connected to the selected Socket.IO room.
 - **Board controls:** Room owners can delete rooms; expand a board for a scrollable workspace, pan with Space+drag, and press Escape to minimize. Room chat floats over the canvas and can be opened or closed without leaving the board.
+- **Private local assistant:** Use the AI button in chat to ask a question answered by a self-hosted Ollama model. Prompts go only from the browser to this app's server and the configured local model; they are not broadcast, persisted, or sent to a hosted AI provider.
 
 ---
 
@@ -48,8 +49,7 @@ Instead of using standard DOM elements (like SVG) which degrade with high object
 SyncBoard's PostgreSQL objects live in the dedicated `syncboard` schema, so
 they do not share the default `public` namespace with other applications using
 the same database. The schema contains rooms, canvas shapes, chat messages, and polls with options
-and votes;
-deleting a room also deletes its shapes and messages. The server applies the
+and votes; deleting a room also deletes its associated data. The server applies the
 idempotent DDL on every startup, including when deployed against an existing
 database. Set `DATABASE_URL` to the PostgreSQL connection URL in the API
 service's environment. That role needs permission to create the schema and must
@@ -96,6 +96,18 @@ can run the idempotent schema updates.
    The API and PostgreSQL are available at `http://localhost:3000` and
    `localhost:5432`. The schema is installed when the PostgreSQL volume is
    initialized for the first time.
+
+### Optional local AI assistant
+The assistant uses the small `qwen2.5:0.5b` model through Ollama. Enable the
+local AI profile to run Ollama and download the model:
+```bash
+docker compose --profile local-ai up -d --build
+```
+The initial model download requires an internet connection; prompts and
+responses are processed by Ollama on the local Docker network. For a separately
+hosted API, configure `OLLAMA_BASE_URL` to a private, self-hosted Ollama
+endpoint and `OLLAMA_MODEL` to an installed model. Do not point it at a hosted
+inference service if prompts must remain within your application.
 
 3. **Install Frontend Dependencies:**
    ```bash

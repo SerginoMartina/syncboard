@@ -3,12 +3,14 @@ import express from 'express';
 import { createServer } from 'node:http';
 import cors from 'cors';
 import { Server } from 'socket.io';
+import assistantRouter from './routes/assistant.js';
 import createRoomsRouter from './routes/rooms.js';
 import { initializeDatabase, pool } from './db.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/api/rooms', assistantRouter);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
