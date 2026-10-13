@@ -5,7 +5,7 @@ SyncBoard is a collaborative workspace where multiple users can draw freehand, u
 
 ---
 
-## 🚀 Key "Senior" Features
+## 🚀 Features
 
 ### 1. High-Performance Rendering Engine
 Instead of using standard DOM elements (like SVG) which degrade with high object counts, SyncBoard uses an **HTML5 Canvas** with a dedicated `requestAnimationFrame` rendering loop. This ensures 60fps performance even with hundreds of objects on the board.
