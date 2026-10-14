@@ -1,3 +1,4 @@
+
 name: Deploy Syncboard Client to GitHub Pages
 
 on:
@@ -34,10 +35,15 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies and build
-        run: npm install && npm run build
+      - name: Install dependencies
+        run: npm install
 
-      - name: Upload dist directory
+      - name: Build client
+        run: npm run build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: client/dist
@@ -56,6 +62,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
