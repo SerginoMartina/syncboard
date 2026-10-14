@@ -1,5 +1,4 @@
-
-name: Deploy SyncBoard frontend
+name: Deploy Syncboard Client to GitHub Pages
 
 on:
   push:
@@ -7,14 +6,19 @@ on:
       - main
     paths:
       - "client/**"
-      - ".github/workflows/deploy.yml"
+      - ".github/workflows/deploy.yaml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Build Client
     runs-on: ubuntu-latest
 
     defaults:
@@ -30,23 +34,16 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install dependencies and build
+        run: npm install && npm run build
 
-      - name: Build frontend
-        run: npm run build
-        env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload frontend build
-        uses: actions/upload-pages-artifact@v4
+      - name: Upload dist directory
+        uses: actions/upload-pages-artifact@v3
         with:
           path: client/dist
 
   deploy:
+    name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
 
